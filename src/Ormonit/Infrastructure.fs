@@ -1,17 +1,6 @@
-﻿[<AutoOpen>]
-module internal Infrastructure
+﻿module internal Infrastructure
 
-open System
-open System.IO
-open NLog
-open NLog.Layouts
 open System.Reflection
-open System.Collections.Generic
-open System.Collections.Concurrent
-open System.Diagnostics
-open System.Text
-open System.Threading
-open NNanomsg
 
 #if DNXCORE50
 type AssemblyLoader(folderPath) =
@@ -34,28 +23,3 @@ type AssemblyLoader(folderPath) =
     member s.LoadFromAssemblyPath (path) : Assembly =
         Assembly.LoadFrom(path)
 #endif
-
-
-type ProcessResult = { exitCode : int; stdout : string; stderr : string }
-
-let ExecuteProcess (olog:NLog.Logger) exe cmdline =
-    let psi = new ProcessStartInfo(exe, cmdline)
-    psi.UseShellExecute <- false
-    psi.RedirectStandardOutput <- true
-    psi.RedirectStandardError <- true
-    psi.CreateNoWindow <- true
-    let p = Process.Start(psi)
-    let output = StringBuilder()
-    let error = StringBuilder()
-    p.OutputDataReceived.Add(fun args ->
-        olog.Trace(args.Data)
-        output.Append(args.Data) |> ignore)
-    p.ErrorDataReceived.Add(fun args ->
-        olog.Error(args.Data)
-        error.Append(args.Data) |> ignore)
-    p.BeginErrorReadLine()
-    p.BeginOutputReadLine()
-    //p.WaitForExit()
-    //{ exitCode = p.ExitCode; stdout = output.ToString(); stderr = error.ToString() }
-
-

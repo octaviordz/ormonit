@@ -53,8 +53,6 @@ let private tokenType token =
     else
         "string"
 
-let usage = ""
-
 let parseArgs args =
     try
         let mutable result = Dictionary<string, string>()
