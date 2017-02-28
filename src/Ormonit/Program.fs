@@ -26,7 +26,7 @@ consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|
 fileTarget.FileName <- Layout.FromString @"${basedir}\logs\${shortdate}.log"
 fileTarget.ArchiveFileName <- Layout.FromString @"${basedir}\logs\archive\{#}.log"
 fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
-fileTarget.ArchiveAboveSize <- 1048576L
+fileTarget.ArchiveAboveSize <- 10485760L //10MB
 fileTarget.MaxArchiveFiles <- 3
 fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
 let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)

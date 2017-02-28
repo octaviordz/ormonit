@@ -165,6 +165,7 @@ let rec closeTimedoutSrvs (config:Map<string, string>) (timeoutMark:DateTimeOffs
                 processId = np.Id;
                 openTime = DateTimeOffset(np.StartTime);
                 fileName = srv.fileName;}
+        traceState openedSrvs
         match Array.tryItem (lid + 1) openedSrvs with
         | Some(n) -> closeTimedoutSrvs config timeoutMark n openedSrvs
         | None -> ()
@@ -196,8 +197,6 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
         else
 
         let rec waitForClose () =
-            //log.Trace("waitForClose")
-            //traceState(openedSrvs)
             let rrecv = NN.Recv(socket, buff, SendRecvFlags.NONE)
             if rrecv < 0 then
                 let errn = NN.Errno()
@@ -231,6 +230,7 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
                             sprintf "[%i] Process identity not confirmed %i %A" srv.logicId srv.processId startTime |> log.Warn
                         openedSrvs.[srv.logicId] <- {
                                 srv with closeTime = Some(DateTimeOffset.Now)}
+                        traceState openedSrvs
                     else
                         sprintf "Waiting on [%i] %A." i srv |> log.Trace
                     waitForClose()
@@ -249,6 +249,7 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
 
             let updatedSrv = {openedSrv with closeTime = Some(DateTimeOffset.Now)}
             openedSrvs.[lid] <- updatedSrv
+            traceState openedSrvs
             let index = openedSrvs |> Array.tryFindIndex (fun it ->
                 it <> OpenServiceData.Default &&
                 it.logicId <> 0 &&
@@ -283,7 +284,7 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
             let openedSrv = openedSrvs.[lid]
             let updatedSrv = {openedSrv with lastReply = Some(DateTimeOffset.Now)}
             openedSrvs.[lid] <- updatedSrv
-        traceState openedSrvs
+            traceState openedSrvs
         let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
         let timeoutMark = DateTimeOffset.Now - timeout
         closeTimedoutSrvs config timeoutMark openedSrvs.[0] openedSrvs
