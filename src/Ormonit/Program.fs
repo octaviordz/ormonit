@@ -23,7 +23,7 @@ logConfig.AddTarget("console", consoleTarget)
 let fileTarget = new NLog.Targets.FileTarget()
 logConfig.AddTarget("file", fileTarget)
 consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
-fileTarget.FileName <- Layout.FromString @"${basedir}\logs\${shortdate}.log"
+fileTarget.FileName <- Layout.FromString @"${basedir}\logs\ormonit.log"
 fileTarget.ArchiveFileName <- Layout.FromString @"${basedir}\logs\archive\{#}.log"
 fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
 fileTarget.ArchiveAboveSize <- 10485760L //10MB
