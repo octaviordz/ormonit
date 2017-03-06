@@ -81,3 +81,89 @@ module Logging =
     let log (logFormat:LogFormat<'T>) : unit =
         logf logFormat.LogLevel logFormat.MsgFunc logFormat.Exception [||]
 
+    //let nlogWith (logger:ILog) (logLevel:LogLevel) (msgFunc:Func<string>) (ex:exn) (formatParameters:obj array) : unit =
+    //    let nlogger = logger :> NLog.ILogger
+    //    match logLevel with
+    //    | LogLevel.Trace ->
+    //        nlogger.Log(NLog.LogLevel.Trace, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Debug ->
+    //        nlogger.Log(NLog.LogLevel.Debug, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Info ->
+    //        nlogger.Log(NLog.LogLevel.Info, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Warn ->
+    //        nlogger.Log(NLog.LogLevel.Warn, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Error ->
+    //        nlogger.Log(NLog.LogLevel.Error, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Fatal ->
+    //        nlogger.Log(NLog.LogLevel.Fatal, ex, msgFunc.Invoke(), formatParameters)
+    //    | _ -> ()
+
+    //let logConfig = {createLogger = createNLogLogger; logWith = nlogWith;}
+    //type NLoggerWrapper (logger:NLog.Logger) =
+    //    let logger = logger
+    ////    member private x.logger:NLog.Logger = logger
+    //    interface ILog with
+    //        member s.log (logLevel:LogLevel)  (msgFunc:Func<string>) (ex:exn) (formatParameters:obj array) : unit =
+    //            let nlogger = logger :> NLog.ILogger
+    //            match logLevel with
+    //            | LogLevel.Trace ->
+    //                nlogger.Log(NLog.LogLevel.Trace, ex, msgFunc.Invoke(), formatParameters)
+    //            | LogLevel.Debug ->
+    //                nlogger.Log(NLog.LogLevel.Debug, ex, msgFunc.Invoke(), formatParameters)
+    //            | LogLevel.Info ->
+    //                nlogger.Log(NLog.LogLevel.Info, ex, msgFunc.Invoke(), formatParameters)
+    //            | LogLevel.Warn ->
+    //                nlogger.Log(NLog.LogLevel.Warn, ex, msgFunc.Invoke(), formatParameters)
+    //            | LogLevel.Error ->
+    //                nlogger.Log(NLog.LogLevel.Error, ex, msgFunc.Invoke(), formatParameters)
+    //            | LogLevel.Fatal ->
+    //                nlogger.Log(NLog.LogLevel.Fatal, ex, msgFunc.Invoke(), formatParameters)
+    //            | _ -> ()
+
+    //type ILogProvider =
+    //    abstract create : name:string -> ILog
+    //
+    //let mutable logProvider:ILogProvider = null
+    //let setLogProvider (provider:ILogProvider) =
+    //    logProvider <- provider
+
+    //type NLogProvider () =
+    //    let create (name) =
+    //        NLog.LogManager.GetLogger name
+    //    member x.wrap (logger:NLog.Logger) : ILog =
+
+    //let nlogProvider = NLogProvider()
+    //Ormonit.Logging.setLogProvider (nlogProvider)
+    //let createNLogLogger (name:string) : ILog =
+    //    NLog.LogManager.GetLogger "Ormonit"
+
+    //let nlogWith (logger:ILog) (logLevel:LogLevel) (msgFunc:Func<string>) (ex:exn) (formatParameters:obj array) : unit =
+    //    let nlogger = logger :> NLog.ILogger
+    //    match logLevel with
+    //    | LogLevel.Trace ->
+    //        nlogger.Log(NLog.LogLevel.Trace, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Debug ->
+    //        nlogger.Log(NLog.LogLevel.Debug, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Info ->
+    //        nlogger.Log(NLog.LogLevel.Info, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Warn ->
+    //        nlogger.Log(NLog.LogLevel.Warn, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Error ->
+    //        nlogger.Log(NLog.LogLevel.Error, ex, msgFunc.Invoke(), formatParameters)
+    //    | LogLevel.Fatal ->
+    //        nlogger.Log(NLog.LogLevel.Fatal, ex, msgFunc.Invoke(), formatParameters)
+    //    | _ -> ()
+
+    //let logConfig = {createLogger = createNLogLogger; logWith = nlogWith;}
+
+module Log =
+    let asFunc<'T when 'T : not struct> (value:'T) : Func<'T> =
+        Func<'T>(fun _ -> value)
+
+    let warn (msg:string) (logger:ILog) : unit =
+        logger.log LogLevel.Warn (msg |> asFunc) null [||]
+
+    let create (name:string) (config:LoggingConfig) : Logger =
+        let logger = config.createLogger name
+        Logger(logger, config)
+
