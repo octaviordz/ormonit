@@ -18,7 +18,7 @@ logConfig.AddTarget("console", consoleTarget)
 let fileTarget = new NLog.Targets.FileTarget()
 logConfig.AddTarget("file", fileTarget)
 consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss} ${logger} ${message}"
-fileTarget.FileName <- Layout.FromString @"${basedir}\logs\${shortdate}.log"
+fileTarget.FileName <- Layout.FromString @"${basedir}\logs\Hamster.DbMonitor.log"
 let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)
 logConfig.LoggingRules.Add(rule1)
 let rule2 = new NLog.Config.LoggingRule("Hamster.*", LogLevel.Trace, fileTarget)
