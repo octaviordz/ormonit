@@ -1,4 +1,4 @@
-﻿module Ctrl
+﻿module internal Ctrl
 
 open System
 open System.IO
@@ -189,18 +189,13 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
         supervise config openedSrvs socket nsocket
     | "close" ->
         log.Debug """Supervisor closing. Notify "close" to services."""
-        let rsend = NN.Send(socket, Encoding.UTF8.GetBytes("close"), SendRecvFlags.NONE)
-        if rsend < 0 then
-            let errn = NN.Errno()
-            let errm = NN.StrError(NN.Errno())
+        match Comm.Msg(0, "close") |> Comm.send socket SendRecvFlags.NONE with
+        | Comm.Error (errn, errm) ->
             sprintf """Error %i on "close" (send). %s.""" errn errm |> log.Error
-        else
-
+        | Comm.Msg _ ->
         let rec waitForClose () =
-            let rrecv = NN.Recv(socket, buff, SendRecvFlags.NONE)
-            if rrecv < 0 then
-                let errn = NN.Errno()
-                let errm = NN.StrError(errn)
+            match Comm.recv socket SendRecvFlags.NONE with
+            | Comm.Error (errn, errm) ->
                 //156384766 Operation cannot be performed in this state
                 if errn = 156384766 then
                     sprintf """Expected error %i on "close" (recv). %s.""" errn errm |> log.Trace
@@ -234,12 +229,9 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
                     else
                         sprintf "Waiting on [%i] %A." i srv |> log.Trace
                     waitForClose()
-            else
-
-            let msg = buff.[..rrecv - 1]
-            let lid = BitConverter.ToInt32(msg, 0)
-            let exitCode = BitConverter.ToInt32(msg.[3..], 0)
-            sprintf """Aknowledgement recived from [%d] exit code %i.""" lid exitCode |> log.Debug
+            | Comm.Msg(lid, note) ->
+            let exitCode = note
+            sprintf """Aknowledgement recived from [%d] exit code %s.""" lid exitCode |> log.Debug
             assert (lid > 0)
             assert (lid < openedSrvs.Length)
             let openedSrv = openedSrvs.[lid]
@@ -263,22 +255,15 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
         waitForClose()
     | _ ->
         log.Trace "Requesting report-status."
-        let sr = NN.Send(socket, Encoding.UTF8.GetBytes("report-status"), SendRecvFlags.NONE)
-        if sr < 0 then
-            let errn = NN.Errno()
-            let errm = NN.StrError(errn)
+        match Comm.Msg(0, "report-status") |> Comm.send socket SendRecvFlags.NONE with
+        | Comm.Error (errn, errm) ->
             sprintf """Error %i on "report-status" (send). %s.""" errn errm |> log.Warn
-        let buff : byte array = Array.zeroCreate maxMessageSize
-        let rc = NN.Recv(socket, buff, SendRecvFlags.NONE)
-        if rc < 0 then
-            let errn = NN.Errno()
-            let errm = NN.StrError(errn)
+        | Comm.Msg _ ->
+        match Comm.recv socket SendRecvFlags.NONE with
+        | Comm.Error (errn, errm) ->
             sprintf """Error %i on "report-status" (recv). %s.""" errn errm |> log.Warn
-        else
-            let msg = buff.[..rc - 1]
-            let lid = BitConverter.ToInt32(msg, 0)
-            let status = BitConverter.ToInt32(msg.[3..], 0)
-            sprintf """Reply "report-status" from [%i] status code %i.""" lid status |> log.Trace
+        | Comm.Msg (lid, status) ->
+            sprintf """Reply "report-status" from [%i] status code %s.""" lid status |> log.Trace
             assert (lid > 0)
             assert (lid < openedSrvs.Length)
             let openedSrv = openedSrvs.[lid]

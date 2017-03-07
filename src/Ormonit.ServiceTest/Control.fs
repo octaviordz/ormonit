@@ -9,6 +9,7 @@ open System.Text
 open System.Threading
 open System.Threading.Tasks
 open NNanomsg
+open Comm
 
 let log = LogManager.GetLogger "Ormonit.Test"
 let logConfig = NLog.Config.LoggingConfiguration()
@@ -25,7 +26,6 @@ logConfig.LoggingRules.Add(rule2)
 LogManager.Configuration <- logConfig
 
 let mutable lid = 0
-let maxMessageSize = 256
 let mutable private continu = true
 let private mlock = obj()
 
@@ -37,44 +37,44 @@ let private ctrlloop (config:IDictionary<string, string>) =
     assert (s >= 0)
     let eid = NN.Connect(s, ca)
     assert (eid >= 0)
-    let rec recvloop config =
+    let rec recvloop () =
         //let mutable buff : byte[] = null '\000'
-        let buff : byte array = Array.zeroCreate maxMessageSize
         //log.Info("[{0}] Ormonit test receive (blocking).", lid)
-        let nbytes = NN.Recv(s, buff, SendRecvFlags.NONE)
-        //TODO:Error handling NN.Errno ()
-        assert (nbytes >= 0)
-        let msg = Encoding.UTF8.GetString(buff.[..nbytes - 1])
-        let cmd = msg
-        sprintf "[%i] Ormonit test \"%s\" note received." lid cmd |> log.Info
-        match cmd with
+        match recv s SendRecvFlags.NONE with
+        | Error (errn, errm) ->
+            sprintf """Error %i (recv). %s.""" errn errm |> log.Error
+            recvloop ()
+        | Msg (_, note) ->
+        sprintf "[%i] Ormonit test \"%s\" note received." lid note |> log.Info
+        match note with
         | "close" ->
             let flag = lock mlock (fun () -> continu <- false; continu)
             //log.Trace("""[{0}] Processing "close" notification. continue value {1}""", lid, flag)
-            let bytes = Array.zeroCreate 8
-            Buffer.BlockCopy(BitConverter.GetBytes(lid), 0, bytes, 0, 4)
-            Buffer.BlockCopy(BitConverter.GetBytes(0), 0, bytes, 4, 4)
             log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-            let sr = NN.Send(s, bytes, SendRecvFlags.NONE)
-            assert(sr > 0)
-            //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
+            match Msg(lid, "closing") |> send s SendRecvFlags.NONE with
+            | Error (errn, errm) ->
+                sprintf """Error %i (send). %s.""" errn errm |> log.Error
+                recvloop ()
+            | Msg _ ->
+                //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
+                ()
         | "report-status" ->
-            let rand =Random().NextDouble()
+            let rand = Random().NextDouble()
             if rand > 0.8 then
                 //log.Trace("""[{0}] Processing "report-status" command.""", lid)
-                let bytes = Array.zeroCreate 8
-                Buffer.BlockCopy(BitConverter.GetBytes(lid), 0, bytes, 0, 4)
-                Buffer.BlockCopy(BitConverter.GetBytes(0), 0, bytes, 4, 4)
                 log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                let sr = NN.Send(s, bytes, SendRecvFlags.NONE)
-                //TODO:Error handling NN.Errno ()
-                assert (sr > 0)
-                //log.Trace("""[{0}] Sent "report-status" aknowledgement.""", lid)
+                match Msg(lid, "ok") |> send s SendRecvFlags.NONE with
+                | Error (errn, errm) ->
+                    sprintf """Error %i (send). %s.""" errn errm |> log.Error
+                    recvloop ()
+                | Msg _ ->
+                    //log.Trace("""[{0}] Sent "report-status" aknowledgement.""", lid)
+                    ()
             else
                 log.Warn("""[{0}] Processing "report-status" failed (simulated).""", lid)
-            recvloop config
-        | _ -> recvloop config
-    recvloop config
+            recvloop ()
+        | _ -> recvloop ()
+    recvloop ()
     assert(NN.Shutdown(s, eid) = 0)
     assert(NN.Close(s) = 0)
 
