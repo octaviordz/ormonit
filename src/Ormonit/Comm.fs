@@ -32,7 +32,7 @@ let deserialize (nbytes) (bytes:byte array) =
     let note = Encoding.UTF8.GetString(bytes.[8..nbytes - 1])
     Msg(lid, note)
 
-let send (sok) (flags) (msg:TMsg) =
+let sendWith (sok) (flags) (msg:TMsg) =
     let nbytes = NN.Send(sok, (serialize msg), flags)
     if nbytes < 0 then
         let errn = NN.Errno()
@@ -40,6 +40,12 @@ let send (sok) (flags) (msg:TMsg) =
         Error(errn, errm)
     else
         msg
+
+let send (sok) (msg:TMsg) =
+    sendWith sok SendRecvFlags.NONE msg
+
+let sendDontWait (sok) (msg:TMsg) =
+    sendWith sok SendRecvFlags.DONTWAIT msg
 
 let recv (sok) (flags) =
     let buff = Array.zeroCreate maxMessageSize

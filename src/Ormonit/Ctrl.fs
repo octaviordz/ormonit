@@ -14,11 +14,12 @@ let maxMessageSize = 128
 let superviseInterval = 100
 //time in milliseconds a service has to reply before timingout
 let serviceTimeout = 3000.0
+let closenTimeout = 20.0
 let ormonitFileName = Path.Combine(Environment.CurrentDirectory, "Ormonit")
 let log = LogManager.GetLogger "Ormonit"
 let olog = LogManager.GetLogger "_Ormonit.Output_"
 
-type OpenServiceData = 
+type OpenServiceData =
     {logicId: int;
      processId: int;
      lastReply: DateTimeOffset option;
@@ -34,7 +35,7 @@ type OpenServiceData =
          fileName = String.Empty;}
 
 let executeProcess (fileName:string) (arguments) (olog:Logger) =
-    let psi = new ProcessStartInfo(fileName, arguments)
+    let psi = ProcessStartInfo(fileName, arguments)
     psi.UseShellExecute <- false
     psi.RedirectStandardOutput <- true
     psi.RedirectStandardError <- true
@@ -146,18 +147,19 @@ let rec closeTimedoutSrvs (config:Map<string, string>) (timeoutMark:DateTimeOffs
         else
 
         sprintf """[%i] "report-status" timedout %A.""" srv.logicId srv |> log.Debug
-        let r, p = tryGetProcess srv.processId
-        if r = true then
+        match tryGetProcess srv.processId with
+        | true, p ->
             let startTime = DateTimeOffset(p.StartTime)
             //check if it's the same process
             if srv.openTime = startTime then
-                sprintf "[%i] Killing process %i" srv.logicId srv.processId |> log.Debug
+                sprintf "[%i] Killing process %i." srv.logicId srv.processId |> log.Debug
                 p.Kill()
             else
-                sprintf "[%i] Process identity not confirmed %i %A" srv.logicId srv.processId startTime |> log.Warn
+                sprintf "[%i] Process identity not confirmed %i %A." srv.logicId srv.processId startTime |> log.Warn
+        | false, _ -> ()
         let lid = srv.logicId
         let args = sprintf "--open-service %s --ctrl-address %s --logic-id %d" srv.fileName ca lid
-        sprintf "[%i] Opening service with %s" srv.logicId args |> log.Debug
+        sprintf "[%i] Opening service with %s." srv.logicId args |> log.Debug
         let np = executeProcess ormonitFileName args olog
         openedSrvs.[lid] <- {
             OpenServiceData.Default with
@@ -170,112 +172,138 @@ let rec closeTimedoutSrvs (config:Map<string, string>) (timeoutMark:DateTimeOffs
         | Some(n) -> closeTimedoutSrvs config timeoutMark n openedSrvs
         | None -> ()
 
-let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array) (socket) (nsocket): unit =
+let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array) (sok) (nsok): unit =
     let mutable note = String.Empty
     let ca = config.["controlAddress"]
     let buff : byte array = Array.zeroCreate maxMessageSize
-    let rc = NN.Recv(nsocket, buff, SendRecvFlags.DONTWAIT)
+    let rc = NN.Recv(nsok, buff, SendRecvFlags.DONTWAIT)
     if rc > 0 then
         note <- Encoding.UTF8.GetString(buff.[..rc - 1])
         sprintf "Supervise recived note \"%s\"." note |> log.Trace
     match note with
     | "is-master" ->
-        let rc = NN.Send(nsocket, [|1uy|], SendRecvFlags.DONTWAIT)
+        let rc = NN.Send(nsok, [|1uy|], SendRecvFlags.DONTWAIT)
         if rc < 0 then
             let errn = NN.Errno()
             let errm = NN.StrError(NN.Errno())
             sprintf """Error %i on "is-master" (send). %s.""" errn errm |> log.Warn
         assert (rc > 0)
-        supervise config openedSrvs socket nsocket
+        supervise config openedSrvs sok nsok
     | "close" ->
+        let timeoutMark = DateTime.Now + TimeSpan.FromMilliseconds(closenTimeout)
         log.Debug """Supervisor closing. Notify "close" to services."""
-        match Comm.Msg(0, "close") |> Comm.send socket SendRecvFlags.NONE with
-        | Comm.Error (errn, errm) ->
-            sprintf """Error %i on "close" (send). %s.""" errn errm |> log.Error
-        | Comm.Msg _ ->
-        let rec waitForClose () =
-            match Comm.recv socket SendRecvFlags.NONE with
+        let rec notifySrvs () =
+            match Comm.Msg (0, "close") |> Comm.send sok with
             | Comm.Error (errn, errm) ->
-                //156384766 Operation cannot be performed in this state
-                if errn = 156384766 then
-                    sprintf """Expected error %i on "close" (recv). %s.""" errn errm |> log.Trace
-                else
-                    sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm |> log.Error
-                let index = openedSrvs |> Array.tryFindIndex (fun it ->
-                    it <> OpenServiceData.Default &&
-                    it.logicId <> 0 &&
-                    it.closeTime = None )
-                match index with
-                | None -> ()
-                | Some(i) ->
-                    let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
-                    let timeoutMark = DateTimeOffset.Now - timeout
-                    let srv = openedSrvs.[i]
-                    let iso = timeoutMark >= srv.openTime && srv.lastReply = None
-                    let isl = srv.lastReply <> None && timeoutMark >= srv.lastReply.Value
-                    if iso || isl then
-                        sprintf """Service [%i] timedout %A.""" srv.logicId srv |> log.Debug
-                        let r, p = tryGetProcess srv.processId
-                        let startTime = DateTimeOffset(p.StartTime)
-                        //check if it's the same process
-                        if r && srv.openTime = startTime then
-                            sprintf "[%i] Killing process %i" srv.logicId srv.processId |> log.Debug
-                            p.Kill()
-                        elif r then
-                            sprintf "[%i] Process identity not confirmed %i %A" srv.logicId srv.processId startTime |> log.Warn
-                        openedSrvs.[srv.logicId] <- {
-                                srv with closeTime = Some(DateTimeOffset.Now)}
-                        traceState openedSrvs
-                    else
-                        sprintf "Waiting on [%i] %A." i srv |> log.Trace
-                    waitForClose()
-            | Comm.Msg(lid, note) ->
+                sprintf """Error %i on "close" (send). %s.""" errn errm
+                |> if errn = 156384766 then log.Warn else log.Error
+                if DateTime.Now > timeoutMark
+                then ()
+                else notifySrvs ()
+            | _ -> ()
+        notifySrvs ()
+        match Comm.recv sok SendRecvFlags.NONE with
+        | Comm.Error (errn, errm) ->
+            //156384766 Operation cannot be performed in this state
+            if errn = 156384766
+            then sprintf """Expected error %i on "close" (recv). %s.""" errn errm |> log.Trace
+            else sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm |> log.Error
+        | Comm.Msg (lid, note) ->
             let exitCode = note
             sprintf """Aknowledgement recived from [%d] exit code %s.""" lid exitCode |> log.Debug
             assert (lid > 0)
             assert (lid < openedSrvs.Length)
             let openedSrv = openedSrvs.[lid]
             if OpenServiceData.Default = openedSrv then
-                waitForClose()
+                ()
             else
-
-            let updatedSrv = {openedSrv with closeTime = Some(DateTimeOffset.Now)}
-            openedSrvs.[lid] <- updatedSrv
-            traceState openedSrvs
-            let index = openedSrvs |> Array.tryFindIndex (fun it ->
-                it <> OpenServiceData.Default &&
-                it.logicId <> 0 &&
-                it.closeTime = None )
-            match index with
-            | None -> ()
-            | Some(i) ->
-                sprintf "Waiting on [%i] for aknowledgement %A." i openedSrvs.[i] |> log.Trace
-                waitForClose()
+                let updatedSrv = {openedSrv with closeTime = Some(DateTimeOffset.Now)}
+                openedSrvs.[lid] <- updatedSrv
         log.Trace "Master stopping."
-        waitForClose()
+        let waitOn = List.ofArray openedSrvs |> List.filter (fun it ->
+            it <> OpenServiceData.Default &&
+            it.logicId <> 0 &&
+            it.closeTime = None )
+        waitFor sok openedSrvs waitOn
     | _ ->
         log.Trace "Requesting report-status."
-        match Comm.Msg(0, "report-status") |> Comm.send socket SendRecvFlags.NONE with
+        match Comm.Msg (0, "report-status") |> Comm.send sok with
         | Comm.Error (errn, errm) ->
             sprintf """Error %i on "report-status" (send). %s.""" errn errm |> log.Warn
-        | Comm.Msg _ ->
-        match Comm.recv socket SendRecvFlags.NONE with
-        | Comm.Error (errn, errm) ->
-            sprintf """Error %i on "report-status" (recv). %s.""" errn errm |> log.Warn
-        | Comm.Msg (lid, status) ->
-            sprintf """Reply "report-status" from [%i] status code %s.""" lid status |> log.Trace
-            assert (lid > 0)
-            assert (lid < openedSrvs.Length)
-            let openedSrv = openedSrvs.[lid]
-            let updatedSrv = {openedSrv with lastReply = Some(DateTimeOffset.Now)}
-            openedSrvs.[lid] <- updatedSrv
-            traceState openedSrvs
+        | _ ->
+            match Comm.recv sok SendRecvFlags.NONE with
+            | Comm.Error (errn, errm) ->
+                sprintf """Error %i on "report-status" (recv). %s.""" errn errm |> log.Warn
+            | Comm.Msg (lid, status) ->
+                sprintf """Reply "report-status" from [%i] status code %s.""" lid status |> log.Trace
+                assert (lid > 0)
+                assert (lid < openedSrvs.Length)
+                let openedSrv = openedSrvs.[lid]
+                let updatedSrv = {openedSrv with lastReply = Some(DateTimeOffset.Now)}
+                openedSrvs.[lid] <- updatedSrv
+                traceState openedSrvs
         let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
         let timeoutMark = DateTimeOffset.Now - timeout
         closeTimedoutSrvs config timeoutMark openedSrvs.[0] openedSrvs
         sprintf "Supervisor blocking for %ims." superviseInterval |> log.Trace
         let jr = System.Threading.Thread.CurrentThread.Join(superviseInterval)
-        supervise config openedSrvs socket nsocket
+        supervise config openedSrvs sok nsok
+
+and waitFor (sok:int) (openedSrvs:OpenServiceData array) (waitOn:OpenServiceData list) =
+    let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
+    let timeoutMark = DateTimeOffset.Now - timeout
+    match waitOn with
+    | [] -> ()
+    | wl ->
+        let nwl = wl |> List.fold (fun state srv ->
+            let iso = timeoutMark >= srv.openTime && srv.lastReply = None
+            let isl = srv.lastReply <> None && timeoutMark >= srv.lastReply.Value
+            if not iso && not isl then
+                state
+            else
+                sprintf """Service [%i] timedout %A.""" srv.logicId srv |> log.Debug
+                match tryGetProcess srv.processId with
+                | true, p ->
+                    let startTime = DateTimeOffset(p.StartTime)
+                    //check if it's the same process
+                    if srv.openTime = startTime then
+                        sprintf "[%i] Killing process %i." srv.logicId srv.processId |> log.Debug
+                        try
+                            p.Kill()
+                        with
+                        | ex ->
+                            (ex, sprintf "[%i] Error killing process %i." srv.logicId srv.processId)
+                            |> log.Error
+                    else
+                        sprintf "[%i] Process identity not confirmed %i %A" srv.logicId srv.processId startTime
+                        |> log.Warn
+                | false, p ->
+                    sprintf "[%i] Process not found %i." srv.logicId srv.processId |> log.Warn
+                let lid = srv.logicId
+                let srv = {srv with closeTime = Some(DateTimeOffset.Now)}
+                openedSrvs.[lid] <- srv
+                state ) List.empty
+        match Comm.recv sok SendRecvFlags.NONE with
+        | Comm.Error (errn, errm) ->
+            //156384766 Operation cannot be performed in this state
+            if errn = 156384766
+            then sprintf """Expected error %i on "close" (recv). %s.""" errn errm |> log.Trace
+            else sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm |> log.Error
+        | Comm.Msg (lid, note) ->
+            let exitCode = note
+            sprintf """Aknowledgement recived from [%d] exit code %s.""" lid exitCode |> log.Debug
+            assert (lid > 0)
+            assert (lid < openedSrvs.Length)
+            let openedSrv = openedSrvs.[lid]
+            if OpenServiceData.Default = openedSrv then
+                ()
+            else
+                //Should we care if service process is still running?
+                let updatedSrv = {openedSrv with closeTime = Some(DateTimeOffset.Now)}
+                openedSrvs.[lid] <- updatedSrv
+        sprintf "Waiting on" |> log.Trace
+        traceState <| Array.ofList nwl
+        waitFor sok openedSrvs nwl
 
 let executeSupervisor (config:Map<string, string>) (openedSrvs:OpenServiceData array) (socket) (nsocket) : unit =
     log.Debug "Start supervisor."
