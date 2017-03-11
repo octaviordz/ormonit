@@ -51,7 +51,7 @@ let private ctrlloop (config:IDictionary<string, string>) =
             let flag = lock mlock (fun () -> continu <- false; continu)
             //log.Trace("""[{0}] Processing "close" notification. continue value {1}""", lid, flag)
             log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-            match Msg(lid, "closing") |> send s SendRecvFlags.NONE with
+            match Msg(lid, "closing") |> send s with
             | Error (errn, errm) ->
                 sprintf """Error %i (send). %s.""" errn errm |> log.Error
                 recvloop ()
@@ -63,7 +63,7 @@ let private ctrlloop (config:IDictionary<string, string>) =
             if rand > 0.8 then
                 //log.Trace("""[{0}] Processing "report-status" command.""", lid)
                 log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                match Msg(lid, "ok") |> send s SendRecvFlags.NONE with
+                match Msg(lid, "ok") |> send s with
                 | Error (errn, errm) ->
                     sprintf """Error %i (send). %s.""" errn errm |> log.Error
                     recvloop ()

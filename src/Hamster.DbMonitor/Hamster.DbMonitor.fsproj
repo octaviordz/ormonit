@@ -60,6 +60,7 @@
       <Paket>True</Paket>
     </Content>
     <Compile Include="AssemblyInfo.fs" />
+    <Compile Include="../Ormonit/Comm.fs" />
     <Compile Include="Control.fs" />
     <None Include="App.config" />
     <None Include="paket.references" />

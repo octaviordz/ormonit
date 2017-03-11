@@ -7,6 +7,7 @@ open NLog.Layouts
 open System.Collections.Generic
 open System.Text
 open NNanomsg
+open Comm
 
 let destinationDbPath = @"W:\Dropbox\rts\hamster.db"
 let backupDbPath = @"W:\Dropbox\rts\hamster.db.backup"
@@ -50,28 +51,24 @@ let ctrlloop (lid:int) (ca:string) =
         //buff is initialized with '\000'
         let buff : byte array = Array.zeroCreate 256
         log.Info("Waiting for note.")
-        let rc = NN.Recv(s, buff, SendRecvFlags.NONE)
-        //TODO:Error handling NN.Errno ()
-        assert (rc >= 0)
-        let cmd = Encoding.UTF8.GetString(buff.[..rc - 1])
-        sprintf "\"%s\" note received." cmd |> log.Trace
-        match cmd with
+        match recv s SendRecvFlags.NONE with
+        | Error (errn, errm) ->
+            sprintf """Error %i (recv). %s.""" errn errm |> log.Error
+            recvloop ()
+        | Msg (_, note) ->
+
+        sprintf "\"%s\" note received." note |> log.Trace
+        match note with
         | "close" ->
-            let bytes = Array.zeroCreate 8
-            Buffer.BlockCopy(BitConverter.GetBytes(lid), 0, bytes, 0, 4)
-            Buffer.BlockCopy(BitConverter.GetBytes(0), 0, bytes, 4, 4)
             log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-            let sr = NN.Send(s, bytes, SendRecvFlags.NONE)
-            assert (sr > 0)
-            ()
+            match Msg(lid, "closing") |> send s with
+            | Error (errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
+            | _ -> ()
         | "report-status" ->
-            let bytes = Array.zeroCreate 8
-            Buffer.BlockCopy(BitConverter.GetBytes(lid), 0, bytes, 0, 4)
-            Buffer.BlockCopy(BitConverter.GetBytes(0), 0, bytes, 4, 4)
             log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-            let sr = NN.Send(s, bytes, SendRecvFlags.NONE)
-            //TODO:Error handling NN.Errno ()
-            assert (sr > 0)
+            match Msg(lid, "ok") |> send s with
+            | Error (errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
+            | _ -> ()
             recvloop ()
         | _ -> recvloop ()
     recvloop ()
