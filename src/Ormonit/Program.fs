@@ -1,9 +1,10 @@
 ﻿open Ctrl
 open System
 open System.IO
+open System.Text
+open System.Threading
 open NLog
 open NLog.Layouts
-open System.Text
 open NNanomsg
 
 let mutable config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
@@ -76,8 +77,9 @@ let parseAndExecute argv : int =
             printUsage ()
             ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "start" then
-            let mutable started = false
-            let mutable error = false
+            let mutable started = 0
+            let mutable running = 0
+            let mutable error = 0
             let psi = Diagnostics.ProcessStartInfo(ormonitFileName, "--open-master")
             psi.UseShellExecute <- false
             psi.RedirectStandardOutput <- true
@@ -85,19 +87,30 @@ let parseAndExecute argv : int =
             psi.CreateNoWindow <- true
             let p = Diagnostics.Process.Start(psi)
             p.OutputDataReceived.Add(fun args ->
-                if not started && not (String.IsNullOrEmpty(args.Data))
-                then started <- args.Data.Contains "Master started"
+                if String.IsNullOrEmpty(args.Data) then ()
+                else
+                
+                if Volatile.Read(&started) = 0 then
+                    Interlocked.Exchange(
+                        &started,
+                        if args.Data.Contains "Master started" then 1 else 0 ) |> ignore
+                    Interlocked.Exchange(
+                        &running,
+                        if args.Data.Contains "Master is already running. Terminating." then 1 else 0 ) |> ignore
                 olog.Trace(args.Data) )
             p.ErrorDataReceived.Add(fun args ->
-                if not (String.IsNullOrEmpty(args.Data))
-                then error <- true
+                if String.IsNullOrEmpty(args.Data) then ()
+                else
+                Interlocked.Exchange(&error, 1) |> ignore
                 olog.Error(args.Data) )
             p.BeginErrorReadLine()
             p.BeginOutputReadLine()
-            while not started && not error do
+            while Volatile.Read(&started) = 0 &&
+                    Volatile.Read(&running) = 0 &&
+                    Volatile.Read(&error) = 0 do
                 System.Threading.Thread.CurrentThread.Join 1 |> ignore
-            if error
-            then unknown
+            if error = 1 then unknown
+            elif running  = 1 then unknown
             else ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "stop" then
             let note = "close"

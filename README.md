@@ -11,6 +11,6 @@ Ormonit allows you to create a set of services that run on different OS processe
 * Dynamic loading. [Implemented]
 * Interprocess communication [WIP]
 * Autodetect and load new services. [NOT Implemented]
-* Supervisor. [NOT Implemented]
+* Supervisor. [WIP]
     * Collect service status. [NOT Implemented]
-    * Automatic restart service when needed. [NOT Implemented]    
+    * Automatic restart service when needed. [Implemented]

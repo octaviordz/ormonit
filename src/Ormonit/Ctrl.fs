@@ -24,6 +24,7 @@ type OpenServiceData =
      processId: int;
      lastReply: DateTimeOffset option;
      openTime: DateTimeOffset;
+     isClosing: bool;
      closeTime: DateTimeOffset option;
      fileName: string;}
      static member Default =
@@ -31,6 +32,7 @@ type OpenServiceData =
          processId = -1;
          lastReply = None;
          openTime = DateTimeOffset.MinValue;
+         isClosing = false;
          closeTime = None;
          fileName = String.Empty;}
 
@@ -126,7 +128,7 @@ let tryGetProcess processId =
         true, p
     with
     | ex ->
-        (ex, sprintf "Unable to get process %i" processId) |> log.Warn
+        (ex, sprintf "Unable to get process %i" processId) |> log.Trace
         false, null
         
 let rec closeTimedoutSrvs (config:Map<string, string>) (timeoutMark:DateTimeOffset) (service:OpenServiceData) (openedSrvs:OpenServiceData array) =
@@ -159,18 +161,19 @@ let rec closeTimedoutSrvs (config:Map<string, string>) (timeoutMark:DateTimeOffs
         | false, _ -> ()
         let lid = srv.logicId
         let args = sprintf "--open-service %s --ctrl-address %s --logic-id %d" srv.fileName ca lid
-        sprintf "[%i] Opening service with %s." srv.logicId args |> log.Debug
-        let np = executeProcess ormonitFileName args olog
-        openedSrvs.[lid] <- {
-            OpenServiceData.Default with
-                logicId = lid;
-                processId = np.Id;
-                openTime = DateTimeOffset(np.StartTime);
-                fileName = srv.fileName;}
-        traceState openedSrvs
-        match Array.tryItem (lid + 1) openedSrvs with
-        | Some(n) -> closeTimedoutSrvs config timeoutMark n openedSrvs
-        | None -> ()
+        if not openedSrvs.[0].isClosing then
+            sprintf "[%i] Opening service with %s." srv.logicId args |> log.Debug
+            let np = executeProcess ormonitFileName args olog
+            openedSrvs.[lid] <- {
+                OpenServiceData.Default with
+                    logicId = lid;
+                    processId = np.Id;
+                    openTime = DateTimeOffset(np.StartTime);
+                    fileName = srv.fileName;}
+            traceState openedSrvs
+            match Array.tryItem (lid + 1) openedSrvs with
+            | Some(n) -> closeTimedoutSrvs config timeoutMark n openedSrvs
+            | None -> ()
 
 let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array) (sok) (nsok): unit =
     let mutable note = String.Empty
@@ -190,6 +193,7 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
         assert (rc > 0)
         supervise config openedSrvs sok nsok
     | "close" ->
+        openedSrvs.[0] <- {openedSrvs.[0] with isClosing = true}
         // send aknowledgment of closing to note sender
         NN.Send(nsok, BitConverter.GetBytes(openedSrvs.[0].processId), SendRecvFlags.NONE) |> ignore
         let timeoutMark = DateTime.Now + TimeSpan.FromMilliseconds(closenTimeout)
