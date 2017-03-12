@@ -11,26 +11,22 @@ let ormonitFileName = Path.Combine(Environment.CurrentDirectory, "Ormonit")
 [<EntryPoint>]
 let main argv =
     let start hc =
-        let psi = new ProcessStartInfo(ormonitFileName, "start")
+        let psi = ProcessStartInfo(ormonitFileName, "start")
         psi.UseShellExecute <- false
         psi.RedirectStandardOutput <- true
         psi.RedirectStandardError <- true
         psi.CreateNoWindow <- true
         let p = Process.Start(psi)
-        p.BeginErrorReadLine()
-        p.BeginOutputReadLine()
         p.WaitForExit()
         p.ExitCode = 0
 
     let stop hc =
-        let psi = new ProcessStartInfo(ormonitFileName, "stop")
+        let psi = ProcessStartInfo(ormonitFileName, "stop")
         psi.UseShellExecute <- false
         psi.RedirectStandardOutput <- true
         psi.RedirectStandardError <- true
         psi.CreateNoWindow <- true
         let p = Process.Start(psi)
-        p.BeginErrorReadLine()
-        p.BeginOutputReadLine()
         p.WaitForExit()
         p.ExitCode = 0
 
