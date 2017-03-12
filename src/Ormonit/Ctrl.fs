@@ -190,6 +190,8 @@ let rec supervise (config:Map<string, string>) (openedSrvs:OpenServiceData array
         assert (rc > 0)
         supervise config openedSrvs sok nsok
     | "close" ->
+        // send aknowledgment of closing to note sender
+        NN.Send(nsok, BitConverter.GetBytes(openedSrvs.[0].processId), SendRecvFlags.NONE) |> ignore
         let timeoutMark = DateTime.Now + TimeSpan.FromMilliseconds(closenTimeout)
         log.Debug """Supervisor closing. Notify "close" to services."""
         let rec notifySrvs () =
