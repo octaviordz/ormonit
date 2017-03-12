@@ -128,7 +128,7 @@ let tryGetProcess processId =
         true, p
     with
     | ex ->
-        (ex, sprintf "Unable to get process %i" processId) |> log.Warn
+        (ex, sprintf "Unable to get process %i" processId) |> log.Trace
         false, null
         
 let rec closeTimedoutSrvs (config:Map<string, string>) (timeoutMark:DateTimeOffset) (service:OpenServiceData) (openedSrvs:OpenServiceData array) =

@@ -78,11 +78,8 @@ let parseAndExecute argv : int =
             ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "start" then
             let mutable started = 0
-            let refstarted = ref started
             let mutable running = 0
-            let refrunning = ref running
             let mutable error = 0
-            let referror = ref error
             let psi = Diagnostics.ProcessStartInfo(ormonitFileName, "--open-master")
             psi.UseShellExecute <- false
             psi.RedirectStandardOutput <- true
@@ -93,24 +90,24 @@ let parseAndExecute argv : int =
                 if String.IsNullOrEmpty(args.Data) then ()
                 else
                 
-                if Volatile.Read(refstarted) = 0 then
+                if Volatile.Read(&started) = 0 then
                     Interlocked.Exchange(
-                        refstarted,
+                        &started,
                         if args.Data.Contains "Master started" then 1 else 0 ) |> ignore
                     Interlocked.Exchange(
-                        refrunning,
+                        &running,
                         if args.Data.Contains "Master is already running. Terminating." then 1 else 0 ) |> ignore
                 olog.Trace(args.Data) )
             p.ErrorDataReceived.Add(fun args ->
                 if String.IsNullOrEmpty(args.Data) then ()
                 else
-                Interlocked.Exchange(ref error, 1) |> ignore
+                Interlocked.Exchange(&error, 1) |> ignore
                 olog.Error(args.Data) )
             p.BeginErrorReadLine()
             p.BeginOutputReadLine()
-            while Volatile.Read(refstarted) = 0 &&
-                    Volatile.Read(refrunning) = 0 &&
-                    Volatile.Read(referror) = 0 do
+            while Volatile.Read(&started) = 0 &&
+                    Volatile.Read(&running) = 0 &&
+                    Volatile.Read(&error) = 0 do
                 System.Threading.Thread.CurrentThread.Join 1 |> ignore
             if error = 1 then unknown
             elif running  = 1 then unknown
