@@ -1,9 +1,10 @@
 ﻿open Ctrl
 open System
 open System.IO
+open System.Text
+open System.Threading
 open NLog
 open NLog.Layouts
-open System.Text
 open NNanomsg
 
 let mutable config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
@@ -76,8 +77,12 @@ let parseAndExecute argv : int =
             printUsage ()
             ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "start" then
-            let mutable started = false
-            let mutable error = false
+            let mutable started = 0
+            let refstarted = ref started
+            let mutable running = 0
+            let refrunning = ref running
+            let mutable error = 0
+            let referror = ref error
             let psi = Diagnostics.ProcessStartInfo(ormonitFileName, "--open-master")
             psi.UseShellExecute <- false
             psi.RedirectStandardOutput <- true
@@ -85,19 +90,30 @@ let parseAndExecute argv : int =
             psi.CreateNoWindow <- true
             let p = Diagnostics.Process.Start(psi)
             p.OutputDataReceived.Add(fun args ->
-                if not started && not (String.IsNullOrEmpty(args.Data))
-                then started <- args.Data.Contains "Master started"
+                if String.IsNullOrEmpty(args.Data) then ()
+                else
+                
+                if Volatile.Read(refstarted) = 0 then
+                    Interlocked.Exchange(
+                        refstarted,
+                        if args.Data.Contains "Master started" then 1 else 0 ) |> ignore
+                    Interlocked.Exchange(
+                        refrunning,
+                        if args.Data.Contains "Master is already running. Terminating." then 1 else 0 ) |> ignore
                 olog.Trace(args.Data) )
             p.ErrorDataReceived.Add(fun args ->
-                if not (String.IsNullOrEmpty(args.Data))
-                then error <- true
+                if String.IsNullOrEmpty(args.Data) then ()
+                else
+                Interlocked.Exchange(ref error, 1) |> ignore
                 olog.Error(args.Data) )
             p.BeginErrorReadLine()
             p.BeginOutputReadLine()
-            while not started && not error do
+            while Volatile.Read(refstarted) = 0 &&
+                    Volatile.Read(refrunning) = 0 &&
+                    Volatile.Read(referror) = 0 do
                 System.Threading.Thread.CurrentThread.Join 1 |> ignore
-            if error
-            then unknown
+            if error = 1 then unknown
+            elif running  = 1 then unknown
             else ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "stop" then
             let note = "close"
