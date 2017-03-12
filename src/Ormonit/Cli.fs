@@ -30,7 +30,7 @@ let mutable private longOptionDic = Dictionary<string, string>()
 
 let addArg (option : Arg) =
     if String.IsNullOrEmpty(option.Option) = true then
-        raise (System.ArgumentNullException("option.Option"))
+        raise (ArgumentException("option.Option"))
     else
     if String.IsNullOrEmpty(option.LongOption) = false then
         longOptionDic.Add(option.LongOption, option.Option)
