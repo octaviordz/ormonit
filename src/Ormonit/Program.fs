@@ -8,7 +8,6 @@ open NLog.Layouts
 open NNanomsg
 
 let mutable config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
-let notifyAddress = "ipc://ormonit/notify.ipc"
 let printUsage () =
     printfn @"
 Ormonit [options]

@@ -7,30 +7,19 @@ open NLog
 open NLog.Layouts
 
 let ormonitFileName = Path.Combine(Environment.CurrentDirectory, "Ormonit")
+let private ckey = Ctrl.makeMaster ()
 
 [<EntryPoint>]
 let main argv =
     let start hc =
-        let psi = ProcessStartInfo(ormonitFileName, "start")
-        psi.UseShellExecute <- false
-        psi.RedirectStandardOutput <- true
-        psi.RedirectStandardError <- true
-        psi.CreateNoWindow <- true
-        let p = Process.Start(psi)
-        p.WaitForExit()
-        p.ExitCode = 0
+        0 = Ctrl.start ckey
 
     let stop hc =
-        let psi = ProcessStartInfo(ormonitFileName, "stop")
-        psi.UseShellExecute <- false
-        psi.RedirectStandardOutput <- true
-        psi.RedirectStandardError <- true
-        psi.CreateNoWindow <- true
-        let p = Process.Start(psi)
-        p.WaitForExit()
-        p.ExitCode = 0
+        0 = Ctrl.stop ckey
 
     Service.Default
+    |> display_name "Ormonit"
+    |> service_name "Ormonit"
     |> with_start start
     |> with_recovery (ServiceRecovery.Default |> restart (min 10))
     |> with_stop stop
