@@ -3,9 +3,8 @@ open System
 open System.IO
 open System.Text
 open System.Threading
-open NLog
-open NLog.Layouts
 open NNanomsg
+open Ormonit.Logging
 
 let mutable config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
 let printUsage () =
@@ -16,25 +15,43 @@ Options:
     start
     stop
 "
-let log = LogManager.GetLogger "Ormonit"
-let olog = LogManager.GetLogger "_Ormonit.Output_"
+
+let nlog = NLog.LogManager.GetLogger "Ormonit"
+let olog = NLog.LogManager.GetLogger "_Ormonit.Output_"
 let logConfig = NLog.Config.LoggingConfiguration()
 let consoleTarget = new NLog.Targets.ColoredConsoleTarget()
 logConfig.AddTarget("console", consoleTarget)
 let fileTarget = new NLog.Targets.FileTarget()
 logConfig.AddTarget("file", fileTarget)
-consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
-fileTarget.FileName <- Layout.FromString @"${basedir}\logs\ormonit.log"
-fileTarget.ArchiveFileName <- Layout.FromString @"${basedir}\logs\archive\{#}.log"
-fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
+consoleTarget.Layout <-NLog.Layouts.Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
+fileTarget.FileName <- NLog.Layouts.Layout.FromString @"${basedir}\logs\ormonit.log"
+fileTarget.ArchiveFileName <- NLog.Layouts.Layout.FromString @"${basedir}\logs\archive\{#}.log"
+fileTarget.ArchiveNumbering <- NLog.Targets.ArchiveNumberingMode.DateAndSequence
 fileTarget.ArchiveAboveSize <- 10485760L //10MB
 fileTarget.MaxArchiveFiles <- 3
 fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
-let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)
+let rule1 = new NLog.Config.LoggingRule("*", NLog.LogLevel.Trace, consoleTarget)
 logConfig.LoggingRules.Add(rule1)
-let rule2 = new NLog.Config.LoggingRule("Ormonit*", LogLevel.Trace, fileTarget)
+let rule2 = new NLog.Config.LoggingRule("Ormonit*", NLog.LogLevel.Trace, fileTarget)
 logConfig.LoggingRules.Add(rule2)
-LogManager.Configuration <- logConfig
+NLog.LogManager.Configuration <- logConfig
+
+Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
+    match logLevel with
+    | LogLevel.Trace ->
+        nlog.Log(NLog.LogLevel.Trace, ex, msgFunc.Invoke(), formatParameters)
+    | LogLevel.Debug ->
+        nlog.Log(NLog.LogLevel.Debug, ex, msgFunc.Invoke(), formatParameters)
+    | LogLevel.Info ->
+        nlog.Log(NLog.LogLevel.Info, ex, msgFunc.Invoke(), formatParameters)
+    | LogLevel.Warn ->
+        nlog.Log(NLog.LogLevel.Warn, ex, msgFunc.Invoke(), formatParameters)
+    | LogLevel.Error ->
+        nlog.Log(NLog.LogLevel.Error, ex, msgFunc.Invoke(), formatParameters)
+    | LogLevel.Fatal ->
+        nlog.Log(NLog.LogLevel.Fatal, ex, msgFunc.Invoke(), formatParameters)
+    | _ -> ()
+    () )
 
 let parseAndExecute argv : int =
     let ok = 0
@@ -121,7 +138,7 @@ let parseAndExecute argv : int =
             assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
             let eid = NN.Connect(nsocket, notifyAddress)
             assert ( eid >= 0)
-            sprintf "[Stop Process] Notify \"%s\"." note |> log.Trace
+            log (tracel(sprintf "[Stop Process] Notify \"%s\"." note))
             let bytes = Encoding.UTF8.GetBytes(note)
             let send () =
                 let sr = NN.Send (nsocket, bytes, SendRecvFlags.NONE)
@@ -144,7 +161,7 @@ let parseAndExecute argv : int =
                     | Choice1Of2 _ -> (ok, String.Empty)
                     | Choice2Of2 (errn, errm) -> errn, errm
             if errn <> ok then
-                sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm |> log.Warn
+                log (warnl (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
             let recv () =
                 let rr = NN.Recv(nsocket, buff, SendRecvFlags.NONE)
                 if rr = 4 then
@@ -165,9 +182,9 @@ let parseAndExecute argv : int =
                     | Choice1Of2 pid -> masterpid <- pid; (ok, String.Empty)
                     | Choice2Of2 (errn, errm) -> (errn, errm)
             if errn = ok then
-                sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid |> log.Info
+                log (infol(sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
             else
-                sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm |> log.Warn
+                log (warnl(sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             NN.Shutdown(nsocket, eid) |> ignore
             NN.Close(nsocket) |> ignore
             if errn <> ok  then unknown
@@ -181,10 +198,10 @@ let parseAndExecute argv : int =
                     ok
                 with
                 | ex ->
-                    sprintf "[Stop Process] Error waiting for master's exit. Master pid: %i." masterpid
-                    |> log.Error
+                    errorl (sprintf "[Stop Process] Error waiting for master's exit. Master pid: %i." masterpid)
+                    |> log
                     unknown
-                
+        
         elif parsedArgs.ContainsKey "notify" then
             let note = parsedArgs.["notify"]
             let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
@@ -194,8 +211,8 @@ let parseAndExecute argv : int =
             assert (NN.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
             assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
             let eid = NN.Connect(nsocket, notifyAddress)
-            assert ( eid >= 0)
-            sprintf "Notify \"%s\" (notify process)." note |> log.Trace
+            assert (eid >= 0)
+            log (tracel (sprintf "Notify \"%s\" (notify process)." note))
             let bytes = Encoding.UTF8.GetBytes(note)
             let send () =
                 let sr = NN.Send (nsocket, bytes, SendRecvFlags.NONE)
@@ -211,7 +228,7 @@ let parseAndExecute argv : int =
                 match send () with
                 | 0, _ -> ()
                 | errn, errm ->
-                    sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm |> log.Warn
+                    log (warnl(sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm))
             | _ -> ()
             let recv () =
                 let rr = NN.Recv(nsocket, buff, SendRecvFlags.NONE)
@@ -226,18 +243,18 @@ let parseAndExecute argv : int =
             match recv () with
             | Choice1Of2 pid -> masterpid <- pid
             | Choice2Of2 (errn, errm) -> //we try again
-                sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm |> log.Trace
+                log (tracel (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
                 match recv () with
                 | Choice1Of2 pid -> masterpid <- pid
                 | Choice2Of2 (errn, errm) ->
-                    sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm |> log.Warn
+                    log (warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             if masterpid <> -1 then
-                sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid |> log.Info
+                log (infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
             NN.Shutdown(nsocket, eid) |> ignore
             NN.Close(nsocket) |> ignore
             ok
         elif parsedArgs.ContainsKey "openMaster" then
-            log.Info "Master starting."
+            log(infol "Master starting.")
             let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)
@@ -253,9 +270,9 @@ let parseAndExecute argv : int =
                     let errm = NN.StrError(errn)
                     //11 Resource unavailable, try again
                     if errn = 11 && errm = "Resource unavailable, try again" then
-                        sprintf "Expected error checking for master (send). %s." errm |> log.Trace
+                        log (tracel (sprintf "Expected error checking for master (send). %s." errm))
                     else
-                        sprintf "Error %i checking for master (send). %s." errn errm |> log.Warn
+                        log (warnl (sprintf "Error %i checking for master (send). %s." errn errm))
                 let recv () =
                     let rr = NN.Recv(nsocket, buff, SendRecvFlags.NONE)
                     if rr < 0 then
@@ -263,9 +280,9 @@ let parseAndExecute argv : int =
                         let errm = NN.StrError(errn)
                         //11 Resource unavailable, try again
                         if errn = 11 && errm = "Resource unavailable, try again" then
-                            sprintf "Expected error checking for master (recv). %s." errm |> log.Trace
+                            log (tracel (sprintf "Expected error checking for master (recv). %s." errm))
                         else
-                            sprintf "Error %i checking for master (recv). %s." errn errm |> log.Warn
+                            log (warnl (sprintf "Error %i checking for master (recv). %s." errn errm))
                         false, errn
                     else
                         true, 0
@@ -274,7 +291,7 @@ let parseAndExecute argv : int =
                 | _ -> ()
                 isMasterRunning <- buff.[0] = 1uy
             if isMasterRunning then
-                sprintf "Master is already running. Terminating." |> log.Warn
+                log (warnl(sprintf "Master is already running. Terminating."))
                 NN.Shutdown(nsocket, eidp) |> ignore
                 NN.Close(nsocket) |> ignore
                 ok
@@ -312,7 +329,7 @@ let parseAndExecute argv : int =
                 let lid =  index + i
                 let args = sprintf "--open-service %s --ctrl-address %s --logic-id %d" it.Location ca lid
                 let cmdArgs = sprintf "%s %s" ormonitFileName args
-                log.Trace(cmdArgs)
+                log(tracel cmdArgs)
                 let p = executeProcess ormonitFileName args olog
                 let openTime = DateTimeOffset(p.StartTime)
                 openedSrvs.[lid] <- {
@@ -322,14 +339,14 @@ let parseAndExecute argv : int =
                         openTime = openTime;
                         fileName = it.Location;}
                 last <- lid )
-            sprintf """Master started with %i %s, controlAddress: "%s".""" last (if last > 1 then "services" else "service") ca
-            |> log.Info
+            infol (sprintf """Master started with %i %s, controlAddress: "%s".""" last (if last > 1 then "services" else "service") ca)
+            |> log
             executeSupervisor config openedSrvs socket nsocket
             assert(NN.Shutdown(socket, eid) = 0)
             assert(NN.Shutdown(nsocket, eidp) = 0)
             assert(NN.Close(socket) = 0)
             assert(NN.Close(nsocket) = 0)
-            log.Info "Master stopped."
+            log(infol "Master stopped.")
             NN.Term()
             ok
         elif parsedArgs.ContainsKey "openService" then
@@ -344,7 +361,7 @@ let parseAndExecute argv : int =
 
 [<EntryPoint>]
 let main argv =
-    sprintf "Run with arguments \"%s\"" (String.Join(" ", argv)) |> log.Trace
+    log (tracel(sprintf "Run with arguments \"%s\"" (String.Join(" ", argv))))
     try
         match List.ofArray argv with
         | [] ->
@@ -362,9 +379,9 @@ let main argv =
     with
     | ex ->
         if isNull ex.InnerException then
-            sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message |> log.Error
-            sprintf "StackTrace: %s" ex.StackTrace |> log.Error
+            log (errorl(sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message))
+            log (errorl(sprintf "StackTrace: %s" ex.StackTrace))
         else
-            sprintf "Command failed.\nErrorType:%s\nError:\n%s\nInnerException:\n%s" (ex.GetType().Name) ex.Message ex.InnerException.Message |> log.Error
-            sprintf "StackTrace: %s" ex.StackTrace |> log.Error
+            log (errorl(sprintf "Command failed.\nErrorType:%s\nError:\n%s\nInnerException:\n%s" (ex.GetType().Name) ex.Message ex.InnerException.Message))
+            log (errorl(sprintf "StackTrace: %s" ex.StackTrace))
         1
