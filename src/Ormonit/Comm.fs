@@ -12,6 +12,9 @@ let maxMessageSize = 128
 type TMsg =
     | Msg of int32 * string
     | Error of int32 * string
+    static member Empty = Msg (0, String.Empty)
+
+let Emptym = TMsg.Empty
 
 let serialize (msg:TMsg) =
     match msg with
@@ -44,10 +47,7 @@ let sendWith (sok) (flags) (msg:TMsg) =
 let send (sok) (msg:TMsg) =
     sendWith sok SendRecvFlags.NONE msg
 
-let sendDontWait (sok) (msg:TMsg) =
-    sendWith sok SendRecvFlags.DONTWAIT msg
-
-let recv (sok) (flags) =
+let recvWith (sok) (flags) =
     let buff = Array.zeroCreate maxMessageSize
     let nbytes = NN.Recv(sok, buff, flags)
     if nbytes < 0 then
@@ -56,3 +56,6 @@ let recv (sok) (flags) =
         Error(errn, errm)
     else
         deserialize nbytes buff
+
+let recv (sok) =
+    recvWith sok SendRecvFlags.NONE

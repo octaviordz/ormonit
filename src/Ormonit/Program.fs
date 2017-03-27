@@ -6,7 +6,6 @@ open System.Threading
 open NNanomsg
 open Ormonit.Logging
 
-let mutable config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
 let printUsage () =
     printfn @"
 Ormonit [options]
@@ -56,7 +55,13 @@ Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
 let parseAndExecute argv : int =
     let ok = 0
     let unknown = Int32.MaxValue
-    let openedSrvs: OpenServiceData array = Array.create maxOpenServices OpenServiceData.Default
+    let config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
+    let execc = {
+        masterKey = Int32.MinValue
+        execcType = ExeccType.ConsoleApplication
+        config = config
+        openedSrvs = Array.create maxOpenServices OpenServiceData.Default
+        thread = Thread.CurrentThread }
     Cli.addArg {Cli.arg with
                     Option = "-cmd";
                     LongOption = "--command";
@@ -139,48 +144,30 @@ let parseAndExecute argv : int =
             let eid = NN.Connect(nsocket, notifyAddress)
             assert ( eid >= 0)
             log (tracel(sprintf "[Stop Process] Notify \"%s\"." note))
-            let bytes = Encoding.UTF8.GetBytes(note)
-            let send () =
-                let sr = NN.Send (nsocket, bytes, SendRecvFlags.NONE)
-                if sr < 0 then
-                    let errn = NN.Errno()
-                    let errm = NN.StrError(errn)
-                    Choice2Of2 (errn, errm)
-                else
-                    Choice1Of2 (sr)
+            let send () = Comm.send nsocket (Comm.Msg(execc.masterKey, note))
             let errn, errm = 
                 match send () with
-                | Choice1Of2 _ -> (ok, String.Empty)
-                | Choice2Of2 (errn, errm) ->
+                | Comm.Msg _ -> (ok, String.Empty)
+                | Comm.Error (errn, errm) ->
                     //11 Resource unavailable, try again
                     if errn <> 11 then
                         errn, errm
                     else
                     //we try again
                     match send () with
-                    | Choice1Of2 _ -> (ok, String.Empty)
-                    | Choice2Of2 (errn, errm) -> errn, errm
+                    | Comm.Msg _ -> (ok, String.Empty)
+                    | Comm.Error (errn, errm) -> errn, errm
             if errn <> ok then
                 log (warnl (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
-            let recv () =
-                let rr = NN.Recv(nsocket, buff, SendRecvFlags.NONE)
-                if rr = 4 then
-                    let pid = BitConverter.ToInt32(buff, 0)
-                    Choice1Of2 (pid)
-                elif rr < 0 then
-                    let errn = NN.Errno()
-                    let errm = NN.StrError(errn)
-                    Choice2Of2 (errn, errm)
-                else
-                    Choice2Of2 (unknown, "Unknown")
+            let recv () = Comm.recv nsocket
             let mutable masterpid = -1
             let errn, errm =
                 match recv () with
-                | Choice1Of2 pid -> masterpid <- pid; (ok, String.Empty)
-                | Choice2Of2 (errn, errm) -> //we try again
+                | Comm.Msg (_, npid) -> masterpid <- Int32.Parse(npid); (ok, String.Empty)
+                | Comm.Error (errn, errm) -> //we try again
                     match recv () with
-                    | Choice1Of2 pid -> masterpid <- pid; (ok, String.Empty)
-                    | Choice2Of2 (errn, errm) -> (errn, errm)
+                    | Comm.Msg (_, npid) -> masterpid <- Int32.Parse(npid); (ok, String.Empty)
+                    | Comm.Error (errn, errm) -> (errn, errm)
             if errn = ok then
                 log (infol(sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
             else
@@ -214,39 +201,24 @@ let parseAndExecute argv : int =
             assert (eid >= 0)
             log (tracel (sprintf "Notify \"%s\" (notify process)." note))
             let bytes = Encoding.UTF8.GetBytes(note)
-            let send () =
-                let sr = NN.Send (nsocket, bytes, SendRecvFlags.NONE)
-                if sr < 0 then
-                    let errn = NN.Errno()
-                    let errm = NN.StrError(errn)
-                    errn, errm
-                else 
-                    0, String.Empty
+            let send () = Comm.send nsocket (Comm.Msg(execc.masterKey, note))
             match send () with
             //11 Resource unavailable, try again
-            | 11, errm -> //we try again
+            | Comm.Error (11, errm) -> //we try again
                 match send () with
-                | 0, _ -> ()
-                | errn, errm ->
+                | Comm.Msg _ -> ()
+                | Comm.Error (errn, errm) ->
                     log (warnl(sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm))
             | _ -> ()
-            let recv () =
-                let rr = NN.Recv(nsocket, buff, SendRecvFlags.NONE)
-                if rr < 0 then
-                    let errn = NN.Errno()
-                    let errm = NN.StrError(errn)
-                    Choice2Of2 (errn, errm)
-                else
-                    let pid = BitConverter.ToInt32(buff, 0)
-                    Choice1Of2 (pid)
+            let recv () = Comm.recv nsocket
             let mutable masterpid = -1
             match recv () with
-            | Choice1Of2 pid -> masterpid <- pid
-            | Choice2Of2 (errn, errm) -> //we try again
+            | Comm.Msg (_, npid) -> masterpid <- Int32.Parse(npid)
+            | Comm.Error (errn, errm) -> //we try again
                 log (tracel (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
                 match recv () with
-                | Choice1Of2 pid -> masterpid <- pid
-                | Choice2Of2 (errn, errm) ->
+                | Comm.Msg (_, npid) -> masterpid <- Int32.Parse(npid)
+                | Comm.Error (errn, errm) ->
                     log (warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             if masterpid <> -1 then
                 log (infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
@@ -254,101 +226,8 @@ let parseAndExecute argv : int =
             NN.Close(nsocket) |> ignore
             ok
         elif parsedArgs.ContainsKey "openMaster" then
-            log(infol "Master starting.")
-            let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
-            //TODO:error handling for socket and bind
-            assert (nsocket >= 0)
-            assert (NN.SetSockOpt(nsocket, SocketOption.SNDTIMEO, 1000) = 0)
-            assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, 1000) = 0)
-            let eidp = NN.Connect(nsocket, notifyAddress)
-            let mutable isMasterRunning = false
-            if eidp >= 0 then
-                let buff : byte array = Array.zeroCreate maxMessageSize
-                let sr = NN.Send(nsocket, Encoding.UTF8.GetBytes("is-master"), SendRecvFlags.NONE)
-                if sr < 0 then
-                    let errn = NN.Errno()
-                    let errm = NN.StrError(errn)
-                    //11 Resource unavailable, try again
-                    if errn = 11 && errm = "Resource unavailable, try again" then
-                        log (tracel (sprintf "Expected error checking for master (send). %s." errm))
-                    else
-                        log (warnl (sprintf "Error %i checking for master (send). %s." errn errm))
-                let recv () =
-                    let rr = NN.Recv(nsocket, buff, SendRecvFlags.NONE)
-                    if rr < 0 then
-                        let errn = NN.Errno()
-                        let errm = NN.StrError(errn)
-                        //11 Resource unavailable, try again
-                        if errn = 11 && errm = "Resource unavailable, try again" then
-                            log (tracel (sprintf "Expected error checking for master (recv). %s." errm))
-                        else
-                            log (warnl (sprintf "Error %i checking for master (recv). %s." errn errm))
-                        false, errn
-                    else
-                        true, 0
-                match recv () with
-                | false, 11 -> recv() |> ignore //we try again
-                | _ -> ()
-                isMasterRunning <- buff.[0] = 1uy
-            if isMasterRunning then
-                log (warnl(sprintf "Master is already running. Terminating."))
-                NN.Shutdown(nsocket, eidp) |> ignore
-                NN.Close(nsocket) |> ignore
-                ok
-            else
-
-            let socket = NN.Socket(Domain.SP, Protocol.SURVEYOR)
-            //TODO: error handling for socket and bind
-            assert (socket >= 0)
-            let curp = System.Diagnostics.Process.GetCurrentProcess()
-            //TODO: get arguments information from current process?
-            //let serviceCmd = curp.MainModule.fileName + " " + curp.StartInfo.Arguments
-            let openTime = DateTimeOffset(curp.StartTime)
-            openedSrvs.[0] <- {
-                OpenServiceData.Default with
-                    logicId = 0;
-                    processId = curp.Id;
-                    openTime = openTime;
-                    fileName = curp.MainModule.FileName;}
-            let ca = config.["controlAddress"]
-            let eid = NN.Bind(socket, ca)
-            let eidp = NN.Bind(nsocket, notifyAddress)
-            assert (eid >= 0)
-            assert (eidp >= 0)
-            //TODO: Check for already running ormonit services in case master is interrupted/killed externally
-            //config <- RequestStatus config socket
-            //config <- CollectStatus config q socket
-            //let sr = NN.Send(socket, Encoding.UTF8.GetBytes("close"), SendRecvFlags.NONE)
-            //TODO:Error handling NN.Errno ()
-            //assert (sr >= 0)
-            let index = 1
-            let mutable last = 1
-            let services = loadServices config Environment.CurrentDirectory
-            services
-            |> List.iteri (fun i it ->
-                let lid =  index + i
-                let args = sprintf "--open-service %s --ctrl-address %s --logic-id %d" it.Location ca lid
-                let cmdArgs = sprintf "%s %s" ormonitFileName args
-                log(tracel cmdArgs)
-                let p = executeProcess ormonitFileName args olog
-                let openTime = DateTimeOffset(p.StartTime)
-                openedSrvs.[lid] <- {
-                    OpenServiceData.Default with
-                        logicId = lid;
-                        processId = p.Id;
-                        openTime = openTime;
-                        fileName = it.Location;}
-                last <- lid )
-            infol (sprintf """Master started with %i %s, controlAddress: "%s".""" last (if last > 1 then "services" else "service") ca)
-            |> log
-            executeSupervisor config openedSrvs socket nsocket
-            assert(NN.Shutdown(socket, eid) = 0)
-            assert(NN.Shutdown(nsocket, eidp) = 0)
-            assert(NN.Close(socket) = 0)
-            assert(NN.Close(nsocket) = 0)
-            log(infol "Master stopped.")
-            NN.Term()
-            ok
+            let opr = openMaster (execc)
+            opr
         elif parsedArgs.ContainsKey "openService" then
             let runArg = parsedArgs.["openService"]
             //TOOD: Get arguments --ctrl-address?
