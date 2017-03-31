@@ -40,7 +40,7 @@ let private ctrlloop (config:IDictionary<string, string>) =
     let rec recvloop () =
         //let mutable buff : byte[] = null '\000'
         //log.Info("[{0}] Ormonit test receive (blocking).", lid)
-        match recv s SendRecvFlags.NONE with
+        match recv s with
         | Error (errn, errm) ->
             sprintf """Error %i (recv). %s.""" errn errm |> log.Error
             recvloop ()

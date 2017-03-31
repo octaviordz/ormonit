@@ -51,7 +51,7 @@ let ctrlloop (lid:int) (ca:string) =
         //buff is initialized with '\000'
         let buff : byte array = Array.zeroCreate 256
         log.Info("Waiting for note.")
-        match recv s SendRecvFlags.NONE with
+        match recv s with
         | Error (errn, errm) ->
             sprintf """Error %i (recv). %s.""" errn errm |> log.Error
             recvloop ()
