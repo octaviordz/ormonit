@@ -1,5 +1,6 @@
 source https://www.nuget.org/api/v2
 
+nuget LibLog
 nuget NLog
 nuget NNanomsg
 nuget Topshelf
