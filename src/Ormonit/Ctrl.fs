@@ -24,6 +24,7 @@ let controlAddress = "ipc://ormonit/control.ipc"
 let notifyAddress = "ipc://ormonit/notify.ipc"
 let private olog = LogManager.GetLogger "_Ormonit.Output_"
 
+[<StructuredFormatDisplay("{StructuredDisplayString}")>]
 type OpenServiceData =
     {logicId: int;
      processId: int;
@@ -32,7 +33,19 @@ type OpenServiceData =
      isClosing: bool;
      closeTime: DateTimeOffset option;
      fileName: string;}
-     static member Default =
+    override x.ToString() =
+        let sb = StringBuilder("{")
+        Printf.bprintf sb "logicId = %i;" x.logicId
+        Printf.bprintf sb "\n   processId = %i;" x.processId
+        Printf.bprintf sb "\n   lastReply = %s;" (match x.lastReply with | Some d -> d.ToString("o") | None -> "null")
+        Printf.bprintf sb "\n   openTime = %s;" (x.openTime.ToString("o"))
+        Printf.bprintf sb "\n   isClosing = %A;" x.isClosing
+        Printf.bprintf sb "\n   closeTime = %s;" (match x.closeTime with | Some d -> d.ToString("o") | None -> "null")
+        Printf.bprintf sb "\n   fileName = \"%s\";" x.fileName
+        Printf.bprintf sb "}"
+        sb.ToString()
+    member x.StructuredDisplayString = x.ToString()
+    static member Default =
         {logicId = -1;
          processId = -1;
          lastReply = None;
@@ -80,9 +93,9 @@ let executeProcess (fileName:string) (arguments) (olog:NLog.Logger) =
     psi.CreateNoWindow <- true
     let p = Process.Start(psi)
     p.OutputDataReceived.Add(fun args ->
-        olog.Trace(args.Data) )
+        if args.Data <> null then olog.Trace(args.Data) )
     p.ErrorDataReceived.Add(fun args ->
-        olog.Error(args.Data) )
+        if args.Data <> null then olog.Error(args.Data) )
     p.BeginErrorReadLine()
     p.BeginOutputReadLine()
     p
