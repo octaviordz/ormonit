@@ -18,13 +18,19 @@ let consoleTarget = new NLog.Targets.ColoredConsoleTarget()
 logConfig.AddTarget("console", consoleTarget)
 let fileTarget = new NLog.Targets.FileTarget()
 logConfig.AddTarget("file", fileTarget)
-consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss} ${logger} ${message}"
+consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
 fileTarget.FileName <- Layout.FromString @"${basedir}\logs\Hamster.DbMonitor.log"
+fileTarget.ArchiveFileName <- Layouts.Layout.FromString @"${basedir}\logs\archive\{#}.Hamster.DbMonitor.log"
+fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
+fileTarget.ArchiveAboveSize <- 1048576L
+fileTarget.MaxArchiveFiles <- 2
+fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
 let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)
 logConfig.LoggingRules.Add(rule1)
 let rule2 = new NLog.Config.LoggingRule("Hamster.*", LogLevel.Trace, fileTarget)
 logConfig.LoggingRules.Add(rule2)
 LogManager.Configuration <- logConfig
+
 
 let on_hamster_db_change (e:FileSystemEventArgs) : unit =
     sprintf "\"%s\" event for %s" (e.ChangeType.ToString()) e.FullPath |> log.Info
@@ -51,7 +57,7 @@ let ctrlloop (lid:int) (ca:string) =
         //buff is initialized with '\000'
         let buff : byte array = Array.zeroCreate 256
         log.Info("Waiting for note.")
-        match recv s SendRecvFlags.NONE with
+        match recv s with
         | Error (errn, errm) ->
             sprintf """Error %i (recv). %s.""" errn errm |> log.Error
             recvloop ()

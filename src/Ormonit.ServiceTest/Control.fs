@@ -19,6 +19,11 @@ let fileTarget = new NLog.Targets.FileTarget()
 logConfig.AddTarget("file", fileTarget)
 consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
 fileTarget.FileName <- Layout.FromString @"${basedir}\logs\Ormonit.ServiceTest.log"
+fileTarget.ArchiveFileName <- Layouts.Layout.FromString @"${basedir}\logs\archive\{#}.Ormonit.ServiceTest.log"
+fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
+fileTarget.ArchiveAboveSize <- 1048576L
+fileTarget.MaxArchiveFiles <- 2
+fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
 let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)
 logConfig.LoggingRules.Add(rule1)
 let rule2 = new NLog.Config.LoggingRule("*", LogLevel.Trace, fileTarget)
@@ -40,7 +45,7 @@ let private ctrlloop (config:IDictionary<string, string>) =
     let rec recvloop () =
         //let mutable buff : byte[] = null '\000'
         //log.Info("[{0}] Ormonit test receive (blocking).", lid)
-        match recv s SendRecvFlags.NONE with
+        match recv s with
         | Error (errn, errm) ->
             sprintf """Error %i (recv). %s.""" errn errm |> log.Error
             recvloop ()
