@@ -46,8 +46,8 @@ let on_hamster_db_change (e:FileSystemEventArgs) : unit =
     sprintf "Source \"%s\" copied to destination \"%s\"." e.FullPath destinationDbPath |> log.Trace
     ()
 
-let ctrlloop (lid:int) (ca:string) =
-    sprintf "In control loop with: controlAddress \"%s\", logicId \"%d\"." ca lid |> log.Trace
+let ctrlloop (lid:string) (ca:string) =
+    sprintf "In control loop with: controlAddress \"%s\", logicId \"%s\"." ca lid |> log.Trace
     let s = NN.Socket(Domain.SP, Protocol.RESPONDENT)
     //TODO:error handling for socket and connect
     assert (s >= 0)
@@ -81,8 +81,8 @@ let ctrlloop (lid:int) (ca:string) =
 
 let Start (config:IDictionary<string, string>) =
     let ca = config.["controlAddress"]
-    let p, lid = Int32.TryParse config.["logicId"]
-    if not p then
+    let lid = config.["logicId"]
+    if String.IsNullOrEmpty lid then
         raise (System.ArgumentException("logicId"))
     //sprintf "Start with configuration %A" config |> log.Trace
     //%APPDATA%\Roaming\hamster-applet

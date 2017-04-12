@@ -8,21 +8,19 @@ open System.Collections.Generic
 let optionRegEx = Regex("^-\w+")
 let longOptionRegEx = Regex("^--(\w+)")
 
-type Arg = {
-    mutable Option : string
+type Arg =
+  { mutable Option : string
     mutable LongOption : string
     mutable Destination : string
     mutable Default : string
-    mutable Help : string
-    }
+    mutable Help : string }
 
-let arg = {
-    Option = String.Empty
+let arg =
+  { Option = String.Empty
     LongOption = String.Empty
     Destination = String.Empty
     Default = String.Empty
-    Help = String.Empty
-    }
+    Help = String.Empty }
 
 let mutable private argList = List<Arg>()
 let mutable private argDic = Dictionary<string, Arg>()

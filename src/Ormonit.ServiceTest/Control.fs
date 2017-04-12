@@ -8,6 +8,7 @@ open System.Collections.Generic
 open System.Text
 open System.Threading
 open System.Threading.Tasks
+open System.Security.Cryptography
 open NNanomsg
 open Comm
 
@@ -30,11 +31,26 @@ let rule2 = new NLog.Config.LoggingRule("*", LogLevel.Trace, fileTarget)
 logConfig.LoggingRules.Add(rule2)
 LogManager.Configuration <- logConfig
 
-let mutable lid = 0
+let mutable lid = -1
 let mutable private continu = true
 let private mlock = obj()
 
-let private ctrlloop (config:IDictionary<string, string>) =
+let encrypt publicKey (data:string) : byte array =
+    let cspParams = CspParameters ()
+    cspParams.ProviderType <- 1
+    use rsaProvider = new RSACryptoServiceProvider(cspParams)
+    rsaProvider.ImportCspBlob(Convert.FromBase64String(publicKey))
+    let plain = Encoding.UTF8.GetBytes(data)
+    let encrypted = rsaProvider.Encrypt(plain, false)
+    encrypted
+
+let randomKey () =
+    use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
+    let randomBytes = Array.zeroCreate 12
+    rngCryptoServiceProvider.GetBytes(randomBytes)
+    Convert.ToBase64String(randomBytes)
+
+let private ctrlloop (config:Map<string, string>) =
     let ca = config.["controlAddress"]
     sprintf "[%i] Ormonit test in control loop with" lid |> log.Trace
     let s = NN.Socket(Domain.SP, Protocol.RESPONDENT)
@@ -47,16 +63,20 @@ let private ctrlloop (config:IDictionary<string, string>) =
         //log.Info("[{0}] Ormonit test receive (blocking).", lid)
         match recv s with
         | Error (errn, errm) ->
-            sprintf """Error %i (recv). %s.""" errn errm |> log.Error
+            sprintf """[%i] Error %i (recv). %s.""" lid errn errm |> log.Error
             recvloop ()
         | Msg (_, note) ->
-        sprintf "[%i] Ormonit test \"%s\" note received." lid note |> log.Info
-        match note with
+        let nparts = note.Split([|' '|], StringSplitOptions.RemoveEmptyEntries)
+        let cmd = if nparts.Length > 0 then nparts.[0] else String.Empty
+        let args = List.ofArray (if nparts.Length > 1 then nparts.[1..] else [||])
+        //let parsed = Cli.parseArgs args
+        sprintf "[%i] Ormonit test \"%s\" note received. (%s)" lid note cmd |> log.Info
+        match cmd with
         | "close" ->
             let flag = lock mlock (fun () -> continu <- false; continu)
             //log.Trace("""[{0}] Processing "close" notification. continue value {1}""", lid, flag)
             log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-            match Msg(lid, "closing") |> send s with
+            match Msg(config.["ckey"], "closing") |> send s with
             | Error (errn, errm) ->
                 sprintf """Error %i (send). %s.""" errn errm |> log.Error
                 recvloop ()
@@ -68,15 +88,24 @@ let private ctrlloop (config:IDictionary<string, string>) =
             if rand > 0.8 then
                 //log.Trace("""[{0}] Processing "report-status" command.""", lid)
                 log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                match Msg(lid, "ok") |> send s with
+                match Msg(config.["ckey"], "ok") |> send s with
                 | Error (errn, errm) ->
                     sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                    recvloop ()
                 | Msg _ ->
                     //log.Trace("""[{0}] Sent "report-status" aknowledgement.""", lid)
                     ()
             else
                 log.Warn("""[{0}] Processing "report-status" failed (simulated).""", lid)
+            recvloop ()
+        | "sys:client-key" ->
+            log.Trace("[{0}] Sending client-key: '{1}'.", lid, config.["ckey"])
+            let encrypted = encrypt config.["publicKey"] config.["ckey"]
+            let note = Convert.ToBase64String(encrypted)
+            match Msg(lid.ToString(), note) |> send s with
+            | Error (errn, errm) ->
+                sprintf """Error %i (send). %s.""" errn errm |> log.Error
+            | Msg _ ->
+                log.Trace("[{0}] Sent client-key: '{1}'.", lid, config.["ckey"])
             recvloop ()
         | _ -> recvloop ()
     recvloop ()
@@ -98,14 +127,17 @@ let rec private action () =
         //log.Trace("continue value {0} flag", continu)
         action()
 
-let Start (config: IDictionary<string, string>) =
+let Start (config:Map<string, string>) =
+//    let ckey = randomKey ()
+    let ckey = "0123456789AB"
     let p, logicId = Int32.TryParse config.["logicId"]
     if not p then
-        raise (System.ArgumentException("logicId"))
+        raise (System.ArgumentException("locigId"))
     lid <- logicId
     log.Info("[{0}] Start. Current directory {1}", lid, Environment.CurrentDirectory)
     let task = Task.Run(action)
-    ctrlloop config
+    let nconfig = config.Add("ckey", ckey)
+    ctrlloop nconfig
     log.Info("[{0}] Ormonit test exit control loop.", lid)
     lock mlock (fun () -> continu <- false)
     task.Wait()

@@ -56,12 +56,6 @@ let parseAndExecute argv : int =
     let ok = 0
     let unknown = Int32.MaxValue
     let config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
-    let execc = {
-        masterKey = Int32.MinValue
-        execcType = ExeccType.ConsoleApplication
-        config = config
-        openedSrvs = Array.create maxOpenServices OpenServiceData.Default
-        thread = Thread.CurrentThread }
     Cli.addArg {Cli.arg with
                     Option = "-cmd";
                     LongOption = "--command";
@@ -82,6 +76,10 @@ let parseAndExecute argv : int =
     Cli.addArg {Cli.arg with
                     Option = "--logic-id";
                     Destination="logicId";}
+    Cli.addArg {Cli.arg with
+                    Option = "--public-key";
+                    Destination="publicKey";}
+
     match Cli.parseArgs argv with
     | Choice2Of2(exn) ->
         printUsage ()
@@ -91,9 +89,10 @@ let parseAndExecute argv : int =
             (parsedArgs.Count = 1 && parsedArgs.ContainsKey "command") ||
             (parsedArgs.Count = 1 && parsedArgs.ContainsKey "notify") ||
             (parsedArgs.Count = 1 && parsedArgs.ContainsKey "openMaster") ||
-            (parsedArgs.Count = 3 && parsedArgs.ContainsKey "openService" &&
-                parsedArgs.ContainsKey "controlAddress" &&
-                parsedArgs.ContainsKey "logicId" )
+            (parsedArgs.Count = 4 && parsedArgs.ContainsKey "openService" &&
+                parsedArgs.ContainsKey "logicId" &&
+                parsedArgs.ContainsKey "publicKey" &&
+                parsedArgs.ContainsKey "controlAddress" )
         if not validArgs then
             printUsage ()
             ok
@@ -144,8 +143,8 @@ let parseAndExecute argv : int =
             let eid = NN.Connect(nsocket, notifyAddress)
             assert ( eid >= 0)
             log (tracel(sprintf "[Stop Process] Notify \"%s\"." note))
-            let send () = Comm.send nsocket (Comm.Msg(execc.masterKey, note))
-            let errn, errm = 
+            let send () = Comm.send nsocket (Comm.Msg("", note))
+            let errn, errm =
                 match send () with
                 | Comm.Msg _ -> (ok, String.Empty)
                 | Comm.Error (errn, errm) ->
@@ -201,7 +200,7 @@ let parseAndExecute argv : int =
             assert (eid >= 0)
             log (tracel (sprintf "Notify \"%s\" (notify process)." note))
             let bytes = Encoding.UTF8.GetBytes(note)
-            let send () = Comm.send nsocket (Comm.Msg(execc.masterKey, note))
+            let send () = Comm.send nsocket (Comm.Msg("", note))
             match send () with
             //11 Resource unavailable, try again
             | Comm.Error (11, errm) -> //we try again
@@ -226,13 +225,23 @@ let parseAndExecute argv : int =
             NN.Close(nsocket) |> ignore
             ok
         elif parsedArgs.ContainsKey "openMaster" then
+            let pubkey, prikey = createAsymetricKeys ()
+            let execc =
+              { masterKey = ""
+                publicKey = pubkey
+                privateKey = prikey
+                execcType = ExeccType.ConsoleApplication
+                config = config
+                lids = Map.empty
+                openedSrvs = Array.create maxOpenServices OpenServiceData.Default
+                thread = Thread.CurrentThread }
             let opr = openMaster (execc)
             opr
         elif parsedArgs.ContainsKey "openService" then
             let runArg = parsedArgs.["openService"]
-            //TOOD: Get arguments --ctrl-address?
-            let srvconfig = config.Add("assemblyPath", runArg).
-                                   Add("logicId", parsedArgs.["logicId"])
+            let srvconfig = config.Add("logicId", parsedArgs.["logicId"]).
+                                   Add("publicKey", parsedArgs.["publicKey"]).
+                                   Add("assemblyPath", runArg)
             executeService srvconfig
             ok
         else
