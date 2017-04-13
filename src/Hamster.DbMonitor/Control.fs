@@ -65,12 +65,12 @@ let ctrlloop (lid:string) (ca:string) =
 
         sprintf "\"%s\" note received." note |> log.Trace
         match note with
-        | "close" ->
+        | "sys:close" ->
             log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
             match Msg(lid, "closing") |> send s with
             | Error (errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
             | _ -> ()
-        | "report-status" ->
+        | "sys:report-status" ->
             log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
             match Msg(lid, "ok") |> send s with
             | Error (errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error

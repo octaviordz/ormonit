@@ -290,12 +290,12 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
     
     //let parsed = Cli.parseArgs args
     match cmd with
-    | "is-master" -> 
+    | "sys:is-master" -> 
         match Comm.Msg("", "master") |> Comm.sendWith nsok SendRecvFlags.DONTWAIT with
         | Comm.Error(errn, errm) -> log <| Warnl (sprintf """Error %i on "is-master" (send). %s.""" errn errm)
         | _ -> ()
         supervise sok nsok nmsgs execc
-    | "close" -> 
+    | "sys:close" -> 
         if execc.execcType = ExeccType.WindowsService && execc.masterKey <> ckey then 
             log (Warnl "Not supported when running as Windows Service.")
             supervise sok nsok nmsgs execc
@@ -306,7 +306,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
             Comm.send nsok (Comm.Msg("", npid)) |> ignore
             log <| Debugl ("""Supervisor closing. Notify "close" to services.""")
             let notifySrvs() = 
-                match Comm.Msg("", "close") |> Comm.send sok with
+                match Comm.Msg("", "sys:close") |> Comm.send sok with
                 | Comm.Error(errn, errm) -> 
                     match errn with
                     | 156384766 -> log <| Warnl (sprintf """Error %i on "close" (send). %s.""" errn errm)
@@ -467,7 +467,7 @@ let openMaster (execc : Execc) =
     let eidp = NN.Connect(nsok, notifyAddress)
     let mutable isMasterRunning = false
     if eidp >= 0 then 
-        match Comm.Msg("", "is-master") |> Comm.send nsok with
+        match Comm.Msg("", "sys:is-master") |> Comm.send nsok with
         | Comm.Msg _ -> ()
         | Comm.Error(errn, errm) -> 
             //11 Resource unavailable, try again
@@ -596,7 +596,7 @@ let stop (ckey : Ctlkey) =
     let unknown = Int32.MaxValue
     let execc = shash.[ckey.key]
     let na = execc.config.["notifyAddress"]
-    let note = "close"
+    let note = "sys:close"
     let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
     let buff : byte array = Array.zeroCreate maxMessageSize
     //TODO:error handling for socket and bind

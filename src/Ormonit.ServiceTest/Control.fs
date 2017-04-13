@@ -87,7 +87,7 @@ let private ctrlloop (config : Map<string, string>) =
             //let parsed = Cli.parseArgs args
             sprintf "[%i] Ormonit test \"%s\" note received. (%s)" lid note cmd |> log.Info
             match cmd with
-            | "close" -> 
+            | "sys:close" -> 
                 let flag = 
                     lock mlock (fun () -> 
                         continu <- false
@@ -100,7 +100,7 @@ let private ctrlloop (config : Map<string, string>) =
                     recvloop()
                 | Msg _ -> ()
             //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
-            | "report-status" -> 
+            | "sys:report-status" -> 
                 let rand = Random().NextDouble()
                 if rand > 0.8 then 
                     //log.Trace("""[{0}] Processing "report-status" command.""", lid)
