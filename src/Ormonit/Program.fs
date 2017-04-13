@@ -129,7 +129,7 @@ let parseAndExecute argv : int =
             assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
             let eid = NN.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
-            log (tracel (sprintf "[Stop Process] Notify \"%s\"." note))
+            log (Tracel (sprintf "[Stop Process] Notify \"%s\"." note))
             let send() = Comm.send nsocket (Comm.Msg("", note))
             
             let errn, errm = 
@@ -144,7 +144,7 @@ let parseAndExecute argv : int =
                         | Comm.Msg _ -> (ok, String.Empty)
                         | Comm.Error(errn, errm) -> errn, errm
             if errn <> ok then 
-                log (warnl (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
+                log (Warnl (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
             let recv() = Comm.recv nsocket
             let mutable masterpid = -1
             
@@ -160,10 +160,10 @@ let parseAndExecute argv : int =
                         (ok, String.Empty)
                     | Comm.Error(errn, errm) -> (errn, errm)
             if errn = ok then 
-                infol (sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
+                Infol (sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
                 |> log
             else 
-                warnl (sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
+                Warnl (sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
                 |> log
             NN.Shutdown(nsocket, eid) |> ignore
             NN.Close(nsocket) |> ignore
@@ -177,7 +177,7 @@ let parseAndExecute argv : int =
                         p.WaitForExit()
                         ok
                     with ex -> 
-                        errorl (sprintf "[Stop Process] Error waiting for master's exit. Master pid: %i." masterpid) 
+                        Errorl (sprintf "[Stop Process] Error waiting for master's exit. Master pid: %i." masterpid) 
                         |> log
                         unknown
         elif parsedArgs.ContainsKey "notify" then 
@@ -190,7 +190,7 @@ let parseAndExecute argv : int =
             assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
             let eid = NN.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
-            log (tracel (sprintf "Notify \"%s\" (notify process)." note))
+            log (Tracel (sprintf "Notify \"%s\" (notify process)." note))
             let bytes = Encoding.UTF8.GetBytes(note)
             let send() = Comm.send nsocket (Comm.Msg("", note))
             match send() with
@@ -199,20 +199,20 @@ let parseAndExecute argv : int =
                 match send() with
                 | Comm.Msg _ -> ()
                 | Comm.Error(errn, errm) -> 
-                    log (warnl (sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm))
+                    log (Warnl (sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm))
             | _ -> ()
             let recv() = Comm.recv nsocket
             let mutable masterpid = -1
             match recv() with
             | Comm.Msg(_, npid) -> masterpid <- Int32.Parse(npid)
             | Comm.Error(errn, errm) -> //we try again
-                log (tracel (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+                log (Tracel (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
                 match recv() with
                 | Comm.Msg(_, npid) -> masterpid <- Int32.Parse(npid)
                 | Comm.Error(errn, errm) -> 
-                    log (warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+                    log (Warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             if masterpid <> -1 then 
-                log (infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
+                log (Infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
             NN.Shutdown(nsocket, eid) |> ignore
             NN.Close(nsocket) |> ignore
             ok
@@ -242,7 +242,7 @@ let parseAndExecute argv : int =
 
 [<EntryPoint>]
 let main argv = 
-    log (tracel (sprintf "Run with arguments \"%s\"" (String.Join(" ", argv))))
+    log (Tracel (sprintf "Run with arguments \"%s\"" (String.Join(" ", argv))))
     try 
         match List.ofArray argv with
         | [] -> 
@@ -253,11 +253,11 @@ let main argv =
         | argl -> Array.ofList argl |> parseAndExecute
     with ex -> 
         if isNull ex.InnerException then 
-            errorl (sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message) |> log
-            errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
+            Errorl (sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message) |> log
+            Errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
         else 
-            errorl 
+            Errorl 
                 (sprintf "Command failed.\nErrorType:%s\nError:\n%s\nInnerException:\n%s" (ex.GetType().Name) ex.Message 
                      ex.InnerException.Message) |> log
-            errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
+            Errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
         1
