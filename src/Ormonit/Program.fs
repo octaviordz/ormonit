@@ -226,7 +226,7 @@ let parseAndExecute argv : int =
                   execcType = ExeccType.ConsoleApplication
                   config = config
                   lids = Map.empty
-                  openedSrvs = Array.create maxOpenServices OpenServiceData.Default
+                  services = Array.create maxOpenServices ServiceData.Default
                   thread = Thread.CurrentThread }
             
             let opr = openMaster (execc)

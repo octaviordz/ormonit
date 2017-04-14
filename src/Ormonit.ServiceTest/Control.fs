@@ -25,7 +25,7 @@ consoleTarget.Layout <- Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|
 fileTarget.FileName <- Layout.FromString @"${basedir}\logs\Ormonit.ServiceTest.log"
 fileTarget.ArchiveFileName <- Layouts.Layout.FromString @"${basedir}\logs\archive\{#}.Ormonit.ServiceTest.log"
 fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
-fileTarget.ArchiveAboveSize <- 1048576L
+fileTarget.ArchiveAboveSize <- 524288L
 fileTarget.MaxArchiveFiles <- 2
 fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
 
@@ -74,18 +74,31 @@ let private ctrlloop (config : Map<string, string>) =
             sprintf """[%i] Error %i (recv). %s.""" lid errn errm |> log.Error
             recvloop()
         | Msg(_, note) -> 
+            sprintf "[%i] Ormonit test \"%s\" note received." lid note |> log.Info
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             
-            let cmd = 
-                if nparts.Length > 0 then nparts.[0]
-                else String.Empty
-            
             let args = 
-                List.ofArray (if nparts.Length > 1 then nparts.[1..]
-                              else [||])
+                if nparts.Length > 1 then nparts.[1..]
+                else [||]
             
-            //let parsed = Cli.parseArgs args
-            sprintf "[%i] Ormonit test \"%s\" note received. (%s)" lid note cmd |> log.Info
+            let cmd = 
+                match Cli.parseArgs args with
+                | Choice2Of2 exn -> 
+                    sprintf "[%i] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
+                    note
+                | Choice1Of2 parsed -> 
+                    match parsed.TryGetValue "logicId" with
+                    | false, _ -> 
+                        sprintf "[%i] No logicId in note \"%s\"." lid note |> log.Warn
+                        note
+                    | true, logicId when logicId <> lid.ToString() -> 
+                        sprintf "[%i] Invalid logicId ignoring note \"%s\". " lid note |> log.Warn
+                        String.Empty
+                    | true, logicId -> 
+                        if nparts.Length > 0 then nparts.[0]
+                        else String.Empty
+            
+            sprintf "[%i] Ormonit test cmd \"%s\"." lid cmd |> log.Info
             match cmd with
             | "sys:close" -> 
                 let flag = 
@@ -140,6 +153,8 @@ let rec private action() =
         action()
 
 let Start(config : Map<string, string>) = 
+    Cli.addArg { Cli.arg with Option = "--logic-id"
+                              Destination = "logicId" }
     //let ckey = randomKey()
     let ckey = "0123456789AB"
     let p, logicId = Int32.TryParse config.["logicId"]
@@ -153,3 +168,4 @@ let Start(config : Map<string, string>) =
     lock mlock (fun () -> continu <- false)
     task.Wait()
     log.Info("[{0}] Ormonit test exit.", lid)
+

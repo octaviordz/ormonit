@@ -14,7 +14,7 @@ open Ormonit
 open Ormonit.Logging
 
 let maxOpenServices = 50
-let maxMessageSize = 128
+let maxMessageSize = Comm.maxMessageSize
 //time in milliseconds supervise waits before runs again
 let superviseInterval = 100
 //time in milliseconds a service has to reply before timingout
@@ -26,7 +26,7 @@ let notifyAddress = "ipc://ormonit/notify.ipc"
 let private olog = LogManager.GetLogger "_Ormonit.Output_"
 
 [<StructuredFormatDisplay("{StructuredDisplayString}")>]
-type OpenServiceData = 
+type ServiceData = 
     { logicId : int
       key : string
       processId : int
@@ -76,7 +76,7 @@ type Execc =
       execcType : ExeccType
       config : Map<string, string>
       lids : Map<string, int>
-      openedSrvs : OpenServiceData array
+      services : ServiceData array
       thread : Thread }
 
 type Ctlkey = 
@@ -136,9 +136,9 @@ let executeProcess (fileName : string) (arguments) (olog : NLog.Logger) =
     psi.CreateNoWindow <- true
     let p = Process.Start(psi)
     p.OutputDataReceived.Add(fun args -> 
-        if isNull args.Data then olog.Trace(args.Data))
+        if not (isNull args.Data) then olog.Trace(args.Data))
     p.ErrorDataReceived.Add(fun args -> 
-        if isNull args.Data then olog.Error(args.Data))
+        if not (isNull args.Data) then olog.Error(args.Data))
     p.BeginErrorReadLine()
     p.BeginOutputReadLine()
     p
@@ -146,12 +146,12 @@ let executeProcess (fileName : string) (arguments) (olog : NLog.Logger) =
 let tryLoadAssembly (fullName) = 
     let asl = AssemblyLoader()
     try 
-        Tracel (sprintf "Try load assembly \"%s\"" fullName) |> log
+        log (Tracel(sprintf "Try load assembly \"%s\"" fullName))
         let a = asl.LoadFromAssemblyPath(fullName)
         //TODO:How to guarantee this is a valid service?!
         Some(a)
     with ex -> 
-        log <| Errorl (ex, (sprintf "Unable to load assembly %s" fullName))
+        log (Errorl(ex, (sprintf "Unable to load assembly %s" fullName)))
         None
 
 let loadServices (config : Map<string, string>) (basedir) = 
@@ -163,21 +163,21 @@ let loadServices (config : Map<string, string>) (basedir) =
 
 let executeService (config : Map<string, string>) : unit = 
     let p = config.["assemblyPath"]
-    log <| Tracel (sprintf "Execute service with configuration \"%A\"" config)
+    log (Tracel(sprintf "Execute service with configuration \"%A\"" config))
     let (?) (t : Type) (mname : string) = t.GetMethod(mname)
     let asl = AssemblyLoader()
     let asm = asl.LoadFromAssemblyPath(p)
     let name = asm.GetName().Name + ".Control"
     let t = asm.GetType(name)
-    if isNull t then log <| Errorl (sprintf "Control not found: %s value %A." name t)
-    else log <| Tracel (sprintf "Control found: %s value %A." name t)
+    if isNull t then log (Errorl(sprintf "Control not found: %s value %A." name t))
+    else log (Tracel(sprintf "Control found: %s value %A." name t))
     let start = t?Start
-    log <| Tracel (sprintf "Control start method: %A." start)
+    log (Tracel(sprintf "Control start method: %A." start))
     start.Invoke(t, [| config |]) |> ignore
 
 let requestStatus (lid : int32) socket = 
-    log <| Infol "Master requests services status."
-    let cbytes = Encoding.UTF8.GetBytes("report-status")
+    log (Infol "Master requests services status.")
+    let cbytes = Encoding.UTF8.GetBytes("sys:report-status")
     let bytes = Array.zeroCreate 5
     Buffer.BlockCopy(BitConverter.GetBytes(lid), 0, bytes, 0, 4)
     Buffer.BlockCopy(cbytes, 4, bytes, 0, cbytes.Length)
@@ -187,75 +187,75 @@ let requestStatus (lid : int32) socket =
 
 let collectStatus (config : Map<string, string>) socket = 
     let ca = config.["controlAddress"]
-    log <| Tracel (sprintf "CollectStatus: controlAddress \"%s\"." ca)
+    log (Tracel(sprintf "CollectStatus: controlAddress \"%s\"." ca))
     //let mutable buff : byte[] = null
     let buff : byte array = Array.zeroCreate maxMessageSize
     let rc = NN.Recv(socket, buff, SendRecvFlags.DONTWAIT)
     if rc < 0 then 
-        log <| Warnl (sprintf "Unable to collect status. NN.Errno %s" (NN.StrError(NN.Errno())))
+        log (Warnl(sprintf "Unable to collect status. NN.Errno %s" (NN.StrError(NN.Errno()))))
         config
     else 
         let cmd = Encoding.UTF8.GetString(buff.[..rc - 1])
-        log <| Warnl (sprintf "CollectStatus \"%s\" reply." cmd)
+        log (Warnl(sprintf "CollectStatus \"%s\" reply." cmd))
         config
 
-let traceState (openedSrvs) = 
-    log <| Tracel (fun () -> 
-               let strBuilder = StringBuilder("OpenedSrvs: ")
-               openedSrvs
-               |> Array.takeWhile (fun it -> it <> OpenServiceData.Default)
-               |> Printf.bprintf strBuilder "%A"
-               strBuilder.ToString())
+let traceState (services) = 
+    log (Tracel(fun () -> 
+             let strBuilder = StringBuilder("OpenedSrvs: ")
+             services
+             |> Array.takeWhile (fun it -> it <> ServiceData.Default)
+             |> Printf.bprintf strBuilder "%A"
+             strBuilder.ToString()))
 
 let tryGetProcess processId = 
     try 
         let p = Process.GetProcessById(processId)
         true, p
     with ex -> 
-        log <| Tracel (ex, (sprintf "Unable to get process %i" processId))
+        log (Tracel(ex, (sprintf "Unable to get process %i" processId)))
         false, null
 
-let rec closeTimedoutSrvs (timeoutMark : DateTimeOffset) (service : OpenServiceData) (execc : Execc) = 
+let rec closeTimedoutSrvs (timeoutMark : DateTimeOffset) (service : ServiceData) (execc : Execc) = 
     let ca = execc.config.["controlAddress"]
     match service with
-    | srv when srv = OpenServiceData.Default -> ()
+    | srv when srv = ServiceData.Default -> ()
     | { logicId = 0 } -> 
-        match Array.tryItem 1 execc.openedSrvs with
+        match Array.tryItem 1 execc.services with
         | Some(n) -> closeTimedoutSrvs timeoutMark n execc
         | None -> ()
     | srv -> 
         let iso = timeoutMark >= srv.openTime && srv.lastReply = None
         let isl = srv.lastReply <> None && timeoutMark >= srv.lastReply.Value
         if not iso && not isl then 
-            match Array.tryItem (srv.logicId + 1) execc.openedSrvs with
+            match Array.tryItem (srv.logicId + 1) execc.services with
             | Some(n) -> closeTimedoutSrvs timeoutMark n execc
             | None -> ()
         else 
-            log <| Debugl (sprintf """[%i] "report-status" timedout %A.""" srv.logicId srv)
+            log (Debugl(sprintf """[%i] "report-status" timedout %A.""" srv.logicId srv))
             match tryGetProcess srv.processId with
             | true, p -> 
                 let startTime = DateTimeOffset(p.StartTime)
                 //check if it's the same process
                 if srv.openTime = startTime then 
-                    log <| Debugl (sprintf "[%i] Killing process %i." srv.logicId srv.processId)
+                    log (Debugl(sprintf "[%i] Killing process %i." srv.logicId srv.processId))
                     p.Kill()
                 else 
                     log 
-                    <| Warnl (sprintf "[%i] Process identity not confirmed %i %A." srv.logicId srv.processId startTime)
+                        (Warnl(sprintf "[%i] Process identity not confirmed %i %A." srv.logicId srv.processId startTime))
             | false, _ -> ()
             let lid = srv.logicId
             let args = 
                 sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" lid execc.publicKey ca 
                     srv.fileName
-            if not execc.openedSrvs.[0].isClosing then 
-                log <| Debugl (sprintf "[%i] Opening service with %s." srv.logicId args)
+            if not execc.services.[0].isClosing then 
+                log (Debugl(sprintf "[%i] Opening service with %s." srv.logicId args))
                 let np = executeProcess ormonitFileName args olog
-                execc.openedSrvs.[lid] <- { OpenServiceData.Default with logicId = lid
-                                                                         processId = np.Id
-                                                                         openTime = DateTimeOffset(np.StartTime)
-                                                                         fileName = srv.fileName }
-                traceState execc.openedSrvs
-                match Array.tryItem (lid + 1) execc.openedSrvs with
+                execc.services.[lid] <- { ServiceData.Default with logicId = lid
+                                                                   processId = np.Id
+                                                                   openTime = DateTimeOffset(np.StartTime)
+                                                                   fileName = srv.fileName }
+                traceState execc.services
+                match Array.tryItem (lid + 1) execc.services with
                 | Some(n) -> closeTimedoutSrvs timeoutMark n execc
                 | None -> ()
 
@@ -268,14 +268,14 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
             match Comm.recvWith nsok SendRecvFlags.DONTWAIT with
             | Comm.Error(errn, errm) -> String.Empty, String.Empty
             | Comm.Msg(ckey, note) -> 
-                log (Tracel (sprintf "Supervise recived note \"%s\"." note))
+                log (Tracel(sprintf "Supervise recived note \"%s\"." note))
                 ckey, note
         | msg :: tail -> 
             nmsgs <- tail
             match msg with
             | Comm.Error(errn, errm) -> String.Empty, String.Empty
             | Comm.Msg(ckey, note) -> 
-                log (Tracel (sprintf "Supervise recived internal note \"%s\"." note))
+                log (Tracel(sprintf "Supervise recived internal note \"%s\"." note))
                 ckey, note
     
     let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
@@ -292,7 +292,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
     match cmd with
     | "sys:is-master" -> 
         match Comm.Msg("", "master") |> Comm.sendWith nsok SendRecvFlags.DONTWAIT with
-        | Comm.Error(errn, errm) -> log <| Warnl (sprintf """Error %i on "is-master" (send). %s.""" errn errm)
+        | Comm.Error(errn, errm) -> log (Warnl(sprintf """Error %i on "is-master" (send). %s.""" errn errm))
         | _ -> ()
         supervise sok nsok nmsgs execc
     | "sys:close" -> 
@@ -300,60 +300,61 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
             log (Warnl "Not supported when running as Windows Service.")
             supervise sok nsok nmsgs execc
         else 
-            execc.openedSrvs.[0] <- { execc.openedSrvs.[0] with isClosing = true }
-            let npid = execc.openedSrvs.[0].processId.ToString()
+            execc.services.[0] <- { execc.services.[0] with isClosing = true }
+            let npid = execc.services.[0].processId.ToString()
             // send aknowledgment of closing to note sender
             Comm.send nsok (Comm.Msg("", npid)) |> ignore
-            log <| Debugl ("""Supervisor closing. Notify "close" to services.""")
+            log (Debugl("""Supervisor closing. Notify "close" to services."""))
             let notifySrvs() = 
                 match Comm.Msg("", "sys:close") |> Comm.send sok with
                 | Comm.Error(errn, errm) -> 
                     match errn with
-                    | 156384766 -> log <| Warnl (sprintf """Error %i on "close" (send). %s.""" errn errm)
-                    | _ -> log <| Errorl (sprintf """Error %i on "close" (send). %s.""" errn errm)
+                    | 156384766 -> log <| Warnl(sprintf """Error %i on "close" (send). %s.""" errn errm)
+                    | _ -> log <| Errorl(sprintf """Error %i on "close" (send). %s.""" errn errm)
                     Choice2Of2(errn, errm)
-                | r -> Choice1Of2 r
+                | r -> 
+                    log (Tracel("""Services notified of "close"."""))
+                    Choice1Of2 r
             retryt notifySrvs |> ignore
             match Comm.recv sok with
             | Comm.Error(errn, errm) -> 
                 //156384766 Operation cannot be performed in this state
-                if errn = 156384766 then 
-                    log <| Tracel (sprintf """Expected error %i on "close" (recv). %s.""" errn errm)
-                else log <| Errorl (sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm)
+                if errn = 156384766 then log <| Tracel(sprintf """Expected error %i on "close" (recv). %s.""" errn errm)
+                else log <| Errorl(sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm)
             | Comm.Msg(ckey, note) -> 
                 let exitCode = note
                 match execc.lids.TryFind ckey with
-                | None -> log (Warnl (sprintf """Unable to find ckey "%s". Aknowledgement %s.""" ckey exitCode))
+                | None -> log (Warnl(sprintf """Unable to find ckey "%s". Aknowledgement %s.""" ckey exitCode))
                 | Some lid -> 
-                    log <| Debugl (sprintf """Aknowledgement recived from [%i] exit code %s.""" lid exitCode)
+                    log (Debugl(sprintf """Aknowledgement recived from [%i] exit code %s.""" lid exitCode))
                     assert (lid > 0)
-                    assert (lid < execc.openedSrvs.Length)
-                    let openedSrv = execc.openedSrvs.[lid]
-                    if OpenServiceData.Default = openedSrv then ()
+                    assert (lid < execc.services.Length)
+                    let srv = execc.services.[lid]
+                    if ServiceData.Default = srv then ()
                     else 
-                        let updatedSrv = { openedSrv with closeTime = Some(DateTimeOffset.Now) }
-                        execc.openedSrvs.[lid] <- updatedSrv
-            log <| Tracel "Master stopping."
+                        let updatedSrv = { srv with closeTime = Some(DateTimeOffset.Now) }
+                        execc.services.[lid] <- updatedSrv
+            log (Tracel "Master stopping.")
             let waitOn = 
-                List.ofArray execc.openedSrvs 
-                |> List.filter (fun it -> it <> OpenServiceData.Default && it.logicId <> 0 && it.closeTime = None)
+                List.ofArray execc.services 
+                |> List.filter (fun it -> it <> ServiceData.Default && it.logicId <> 0 && it.closeTime = None)
             waitFor execc sok waitOn
     | "sys:init-service" -> 
         let mutable nexecc = execc
         let n = String.Join(" ", Array.ofList ("sys:client-key" :: args))
         match Comm.Msg("", n) |> Comm.send sok with
-        | Comm.Msg(lid, n) -> log (Tracel (sprintf """Sent "client-key" note."""))
-        | Comm.Error(errn, errm) -> log (Errorl (sprintf """Error %i on "client-key" (send). %s.""" errn errm))
+        | Comm.Msg(lid, n) -> log (Tracel(sprintf """Sent "client-key" note."""))
+        | Comm.Error(errn, errm) -> log (Errorl(sprintf """Error %i on "client-key" (send). %s.""" errn errm))
         match Comm.recv sok with
         | Comm.Error(errn, errm) -> 
-            log (Errorl (sprintf """Error %i on "client-key" (recv). %s.""" errn errm))
+            log (Errorl(sprintf """Error %i on "client-key" (recv). %s.""" errn errm))
             nmsgs <- Comm.Msg(ckey, note) :: nmsgs
         | Comm.Msg(logicId, ekey) -> 
             let lid = Int32.Parse(logicId)
             let clientKey = decrypt execc.privateKey (Convert.FromBase64String(ekey))
             
             let vckey = 
-                match Array.tryItem lid execc.openedSrvs with
+                match Array.tryItem lid execc.services with
                 | None -> false
                 | Some srv -> not (execc.lids.ContainsKey clientKey) && String.IsNullOrEmpty(srv.key)
             if vckey then nexecc <- { execc with lids = execc.lids.Add(clientKey, lid) }
@@ -365,96 +366,96 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
         supervise sok nsok nmsgs nexecc
     | _ -> 
         log (Tracel "Requesting report-status.")
-        match Comm.Msg("", "report-status") |> Comm.send sok with
-        | Comm.Error(errn, errm) -> log <| Warnl (sprintf """Error %i on "report-status" (send). %s.""" errn errm)
+        match Comm.Msg("", "sys:report-status") |> Comm.send sok with
+        | Comm.Error(errn, errm) -> log <| Warnl(sprintf """Error %i on "report-status" (send). %s.""" errn errm)
         | _ -> 
             match Comm.recv sok with
-            | Comm.Error(errn, errm) -> log <| Warnl (sprintf """Error %i on "report-status" (recv). %s.""" errn errm)
+            | Comm.Error(errn, errm) -> log <| Warnl(sprintf """Error %i on "report-status" (recv). %s.""" errn errm)
             | Comm.Msg(ckey, status) -> 
                 match execc.lids.TryFind ckey with
                 | None -> 
                     log 
-                        (Warnl 
+                        (Warnl
                              (sprintf """Reply "report-status" from unknown service [%s] status code %s.""" ckey status))
                 | Some lid -> 
-                    log <| Tracel (sprintf """Reply "report-status" from [%i] status code %s.""" lid status)
+                    log <| Tracel(sprintf """Reply "report-status" from [%i] status code %s.""" lid status)
                     assert (lid > 0)
-                    assert (lid < execc.openedSrvs.Length)
-                    let openedSrv = execc.openedSrvs.[lid]
-                    let updatedSrv = { openedSrv with lastReply = Some(DateTimeOffset.Now) }
-                    execc.openedSrvs.[lid] <- updatedSrv
-                    traceState execc.openedSrvs
+                    assert (lid < execc.services.Length)
+                    let srv = execc.services.[lid]
+                    let updatedSrv = { srv with lastReply = Some(DateTimeOffset.Now) }
+                    execc.services.[lid] <- updatedSrv
+                    traceState execc.services
         let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
         let timeoutMark = DateTimeOffset.Now - timeout
-        closeTimedoutSrvs timeoutMark execc.openedSrvs.[0] execc
-        log <| Tracel (sprintf "Supervisor blocking for %ims." superviseInterval)
+        closeTimedoutSrvs timeoutMark execc.services.[0] execc
+        log <| Tracel(sprintf "Supervisor blocking for %ims." superviseInterval)
         let jr = System.Threading.Thread.CurrentThread.Join(superviseInterval)
         supervise sok nsok nmsgs execc
 
-and waitFor (execc : Execc) (sok : int) (waitOn : OpenServiceData list) = 
+and waitFor (execc : Execc) (sok : int) (wl : ServiceData list) = 
     let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
     let timeoutMark = DateTimeOffset.Now - timeout
-    match waitOn with
+    log (Tracel "Waiting on")
+    traceState (Array.ofList wl)
+    match wl with
     | [] -> ()
     | wl -> 
         let nwl = 
             wl |> List.fold (fun state srv -> 
                       let iso = timeoutMark >= srv.openTime && srv.lastReply = None
                       let isl = srv.lastReply <> None && timeoutMark >= srv.lastReply.Value
-                      if not iso && not isl then state
+                      if not iso && not isl then srv :: state
                       else 
-                          log <| Debugl (sprintf """Service [%i] timedout %A.""" srv.logicId srv)
+                          log (Debugl(sprintf """Service [%i] timedout %A.""" srv.logicId srv))
                           match tryGetProcess srv.processId with
                           | true, p -> 
                               let startTime = DateTimeOffset(p.StartTime)
                               //check if it's the same process
                               if srv.openTime = startTime then 
-                                  log <| Debugl (sprintf "[%i] Killing process %i." srv.logicId srv.processId)
+                                  log (Debugl(sprintf "[%i] Killing process %i." srv.logicId srv.processId))
                                   try 
                                       p.Kill()
                                   with ex -> 
-                                      Errorl (ex, sprintf "[%i] Error killing process %i." srv.logicId srv.processId) 
+                                      Errorl(ex, sprintf "[%i] Error killing process %i." srv.logicId srv.processId) 
                                       |> log
                               else 
-                                  Warnl 
+                                  Warnl
                                       (sprintf "[%i] Process identity not confirmed %i %A" srv.logicId srv.processId 
                                            startTime) |> log
-                          | false, p -> log <| Warnl (sprintf "[%i] Process not found %i." srv.logicId srv.processId)
+                          | false, p -> log (Warnl(sprintf "[%i] Process not found %i." srv.logicId srv.processId))
                           let lid = srv.logicId
                           let srv = { srv with closeTime = Some(DateTimeOffset.Now) }
-                          execc.openedSrvs.[lid] <- srv
+                          execc.services.[lid] <- srv
                           state) List.empty
         match Comm.recv sok with
         | Comm.Error(errn, errm) -> 
             //156384766 Operation cannot be performed in this state
-            if errn = 156384766 then log <| Tracel (sprintf """Expected error %i on "close" (recv). %s.""" errn errm)
-            else log <| Errorl (sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm)
+            if errn = 156384766 then log (Tracel(sprintf """Expected error %i on "close" (recv). %s.""" errn errm))
+            else log (Errorl(sprintf """Unexpected error %i on "close" (recv). %s.""" errn errm))
         | Comm.Msg(ckey, note) -> 
             let exitCode = note
-            log <| Debugl (sprintf """Aknowledgement recived from [%s] exit code %s.""" ckey exitCode)
+            log (Debugl(sprintf """Aknowledgement recived from [%s] exit code %s.""" ckey exitCode))
             let lid = execc.lids.[ckey]
             assert (lid > 0)
-            assert (lid < execc.openedSrvs.Length)
-            let openedSrv = execc.openedSrvs.[lid]
-            if OpenServiceData.Default = openedSrv then ()
+            assert (lid < execc.services.Length)
+            let srv = execc.services.[lid]
+            if ServiceData.Default = srv then ()
             else 
                 //Should we care if service process is still running?
-                let updatedSrv = { openedSrv with closeTime = Some(DateTimeOffset.Now) }
-                execc.openedSrvs.[lid] <- updatedSrv
-        log (Tracel "Waiting on")
-        traceState <| Array.ofList nwl
+                let updatedSrv = { srv with closeTime = Some(DateTimeOffset.Now) }
+                execc.services.[lid] <- updatedSrv
+        System.Threading.Thread.CurrentThread.Join(superviseInterval/2) |> ignore
         waitFor execc sok nwl
 
 let executeSupervisor (execc : Execc) (socket) (nsocket) (msgs) : unit = 
     log (Debugl "Start supervisor.")
     supervise socket nsocket msgs execc
-    traceState execc.openedSrvs
+    traceState execc.services
     //TODO:Wait for process exit
     log (Debugl "Supervisor stop.")
 
 let openMaster (execc : Execc) = 
     let config = execc.config
-    let openedSrvs = execc.openedSrvs
     let ok = 0
     let unknown = Int32.MaxValue
     log (Infol "Master starting.")
@@ -472,21 +473,21 @@ let openMaster (execc : Execc) =
         | Comm.Error(errn, errm) -> 
             //11 Resource unavailable, try again
             if errn = 11 && errm = "Resource unavailable, try again" then 
-                log (Tracel (sprintf "Expected error checking for master (send). %s." errm))
-            else log (Warnl (sprintf "Error %i checking for master (send). %s." errn errm))
+                log (Tracel(sprintf "Expected error checking for master (send). %s." errm))
+            else log (Warnl(sprintf "Error %i checking for master (send). %s." errn errm))
         match Comm.recv nsok with
         | Comm.Msg _ -> isMasterRunning <- true
         | Comm.Error(errn, errm) -> 
             //11 Resource unavailable, try again
             if errn = 11 && errm = "Resource unavailable, try again" then 
-                log (Tracel (sprintf "Expected error checking for master (recv). %s." errm))
-            else log (Warnl (sprintf "Error %i checking for master (recv). %s." errn errm))
+                log (Tracel(sprintf "Expected error checking for master (recv). %s." errm))
+            else log (Warnl(sprintf "Error %i checking for master (recv). %s." errn errm))
             match Comm.recv nsok with
             | Comm.Msg _ -> isMasterRunning <- true
             | Comm.Error(errn, errm) -> ()
     NN.Shutdown(nsok, eidp) |> ignore
     if isMasterRunning then 
-        log (Warnl (sprintf "Master is already running. Terminating."))
+        log (Warnl(sprintf "Master is already running. Terminating."))
         execc.state <- "term"
         NN.Close(nsok) |> ignore
         ok
@@ -498,7 +499,7 @@ let openMaster (execc : Execc) =
         //TODO: get arguments information from current process?
         //let serviceCmd = curp.MainModule.fileName + " " + curp.StartInfo.Arguments
         let openTime = DateTimeOffset(curp.StartTime)
-        openedSrvs.[0] <- { OpenServiceData.Default with logicId = 0
+        execc.services.[0] <- { ServiceData.Default with logicId = 0
                                                          processId = curp.Id
                                                          openTime = openTime
                                                          fileName = curp.MainModule.FileName }
@@ -516,26 +517,26 @@ let openMaster (execc : Execc) =
         let mutable msgs = List.empty
         let index = 1
         let mutable last = 1
-        let services = loadServices config Environment.CurrentDirectory
-        services |> List.iteri (fun i it -> 
-                        let ckey = randomKey()
-                        let lid = index + i
-                        let args = 
-                            sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" lid 
-                                execc.publicKey ca it.Location
-                        let cmdArgs = sprintf "%s %s" ormonitFileName args
-                        log (Tracel cmdArgs)
-                        let p = executeProcess ormonitFileName args olog
-                        let note = sprintf "sys:init-service --logic-id %i" lid
-                        msgs <- List.append msgs [ Comm.Msg(execc.masterKey, note) ]
-                        let openTime = DateTimeOffset(p.StartTime)
-                        openedSrvs.[lid] <- { OpenServiceData.Default with logicId = lid
-                                                                           processId = p.Id
-                                                                           openTime = openTime
-                                                                           fileName = it.Location }
-                        last <- lid)
-        log (Infol (sprintf """Master started with %i %s, controlAddress: "%s".""" last (if last > 1 then "services"
-                                                                                         else "service") ca))
+        let asms = loadServices config Environment.CurrentDirectory
+        asms |> List.iteri (fun i it -> 
+                    let ckey = randomKey()
+                    let lid = index + i
+                    let args = 
+                        sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" lid execc.publicKey 
+                            ca it.Location
+                    let cmdArgs = sprintf "%s %s" ormonitFileName args
+                    log (Tracel cmdArgs)
+                    let p = executeProcess ormonitFileName args olog
+                    let note = sprintf "sys:init-service --logic-id %i" lid
+                    msgs <- List.append msgs [ Comm.Msg(execc.masterKey, note) ]
+                    let openTime = DateTimeOffset(p.StartTime)
+                    execc.services.[lid] <- { ServiceData.Default with logicId = lid
+                                                                       processId = p.Id
+                                                                       openTime = openTime
+                                                                       fileName = it.Location }
+                    last <- lid)
+        log (Infol(sprintf """Master started with %i %s, controlAddress: "%s".""" last (if last > 1 then "services"
+                                                                                        else "service") ca))
         execc.state <- "started"
         executeSupervisor execc socket nsok msgs
         assert (NN.Shutdown(socket, eid) = 0)
@@ -563,7 +564,7 @@ let makeMaster() =
           execcType = ExeccType.WindowsService
           config = config
           lids = Map.empty
-          openedSrvs = Array.create maxOpenServices OpenServiceData.Default
+          services = Array.create maxOpenServices ServiceData.Default
           thread = t }
     main <- fun () -> openMaster execc |> ignore
     let ckey = { key = key }
@@ -578,14 +579,14 @@ let private isOpen (execc) =
 let private isFailed (execc) = 
     let state = lock execc (fun () -> execc.state)
     //log (tracel(sprintf "Execc ThreadState:%A" execc.thread.ThreadState))
-    state <> "started" && state <> "stopped" && state <> null
+    state <> "started" && state <> "stopped" && not (isNull state)
 
 let start (ckey : Ctlkey) = 
     let ok = 0
     let unknown = Int32.MaxValue
     let execc = shash.[ckey.key]
     execc.thread.Start()
-    log (Tracel (sprintf "Execc ThreadState:%A" execc.thread.ThreadState))
+    log (Tracel(sprintf "Execc ThreadState:%A" execc.thread.ThreadState))
     while not (isOpen execc) && not (isFailed execc) do
         System.Threading.Thread.CurrentThread.Join 1 |> ignore
     if isFailed execc then unknown
@@ -605,7 +606,7 @@ let stop (ckey : Ctlkey) =
     assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, superviseInterval * 5) = 0)
     let eid = NN.Connect(nsocket, notifyAddress)
     assert (eid >= 0)
-    log (Tracel (sprintf "[Stop Thread] Notify \"%s\"." note))
+    log (Tracel(sprintf "[Stop Thread] Notify \"%s\"." note))
     let sendr = 
         retryt (fun () -> 
             match Comm.Msg(execc.masterKey, note) |> Comm.send nsocket with
@@ -614,20 +615,20 @@ let stop (ckey : Ctlkey) =
             | m -> Choice1Of2 m)
     match sendr with
     | Choice2Of2(errn, errm) -> 
-        log (Warnl (sprintf "[Stop Thread] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
+        log (Warnl(sprintf "[Stop Thread] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
     | _ -> ()
     let recv() = Comm.recv nsocket
     let mutable masterpid = -1
     match recv() with
     | Comm.Msg(_, npid) -> masterpid <- Int32.Parse(npid)
     | Comm.Error(errn, errm) -> //we try again
-        log (Tracel (sprintf "[Stop Thread] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+        log (Tracel(sprintf "[Stop Thread] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
         match recv() with
         | Comm.Msg(_, npid) -> masterpid <- Int32.Parse(npid)
         | Comm.Error(errn, errm) -> 
-            log (Warnl (sprintf "[Stop Thread] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+            log (Warnl(sprintf "[Stop Thread] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
     if masterpid <> -1 then 
-        log (Infol (sprintf "[Stop Thread] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
+        log (Infol(sprintf "[Stop Thread] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
     NN.Shutdown(nsocket, eid) |> ignore
     NN.Close(nsocket) |> ignore
     //TODO: masterpid needed?
@@ -636,9 +637,10 @@ let stop (ckey : Ctlkey) =
         //TODO: 5000m enough why?
         let thjr = execc.thread.Join(5000)
         if execc.thread.ThreadState <> ThreadState.Stopped then 
-            Fatall 
+            let m = 
                 (sprintf "[Stop Thread] Error waiting for master's exit. Master thread: %i." 
-                     execc.thread.ManagedThreadId) |> log
+                     execc.thread.ManagedThreadId)
+            log (Fatall m)
             execc.thread.Abort()
             unknown
         else ok
