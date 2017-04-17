@@ -57,8 +57,11 @@
       <Paket>True</Paket>
     </Content>
     <Compile Include="AssemblyInfo.fs" />
-    <Compile Include="../Ormonit/Comm.fs">
+    <Compile Include="..\Ormonit\Comm.fs">
       <Link>Comm.fs</Link>
+    </Compile>
+    <Compile Include="..\Ormonit\Cli.fs">
+      <Link>Cli.fs</Link>
     </Compile>
     <Compile Include="Control.fs" />
     <None Include="App.config" />

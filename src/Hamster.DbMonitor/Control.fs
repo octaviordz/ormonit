@@ -77,17 +77,38 @@ let ctrlloop (config : IDictionary<string, string>) =
     assert (s >= 0)
     assert (NN.Connect(s, ca) >= 0)
     let rec recvloop() = 
-        //let mutable buff : byte[] = null
-        //buff is initialized with '\000'
-        let buff : byte array = Array.zeroCreate 256
         log.Info("Waiting for note.")
         match recv s with
         | Error(errn, errm) -> 
             sprintf """Error %i (recv). %s.""" errn errm |> log.Error
             recvloop()
         | Msg(_, note) -> 
-            sprintf "\"%s\" note received." note |> log.Trace
-            match note with
+            sprintf "[%s] \"%s\" note received." lid note |> log.Info
+            let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+            
+            let args = 
+                if nparts.Length > 1 then nparts.[1..]
+                else [||]
+            
+            let cmd = 
+                match Cli.parseArgs args with
+                | Choice2Of2 exn -> 
+                    sprintf "[%s] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
+                    note
+                | Choice1Of2 parsed -> 
+                    match parsed.TryGetValue "logicId" with
+                    | false, _ -> 
+                        sprintf "[%s] No logicId in note \"%s\"." lid note |> log.Warn
+                        note
+                    | true, logicId when logicId <> lid.ToString() -> 
+                        sprintf "[%s] Invalid logicId ignoring note \"%s\". " lid note |> log.Warn
+                        String.Empty
+                    | true, logicId -> 
+                        if nparts.Length > 0 then nparts.[0]
+                        else String.Empty
+            
+            sprintf "[%s] cmd \"%s\"." lid cmd |> log.Trace
+            match cmd with
             | "sys:client-key" -> 
                 log.Trace("[{0}] Sending client-key: '{1}'.", lid, config.["ckey"])
                 let encrypted = encrypt config.["publicKey"] config.["ckey"]
@@ -110,11 +131,14 @@ let ctrlloop (config : IDictionary<string, string>) =
             | _ -> recvloop()
     recvloop()
 
-let Start(config : IDictionary<string, string>) = 
+let Start(config : Map<string, string>) = 
+    Cli.addArg { Cli.arg with Option = "--logic-id"
+                              Destination = "logicId" }
     let ca = config.["controlAddress"]
     let lid = config.["logicId"]
     if String.IsNullOrEmpty lid then raise (System.ArgumentException("logicId"))
-    config.Add("ckey", randomKey())
+    let ckey = randomKey()
+    let nconfig = config.Add("ckey", ckey)
     //sprintf "Start with configuration %A" config |> log.Trace
     //%APPDATA%\Roaming\hamster-applet
     let app_data = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)
@@ -131,6 +155,6 @@ let Start(config : IDictionary<string, string>) =
     //log.Trace("Begin watching.")
     watcher.EnableRaisingEvents <- true
     //log.Info("Enter control loop.")
-    ctrlloop config
+    ctrlloop nconfig
     log.Info("Exit control loop.")
     watcher.Dispose()
