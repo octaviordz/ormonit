@@ -16,13 +16,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "nanomsg", "nanomsg", "{2BB6
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "x64", "x64", "{2B4C8BAC-61A5-467F-9171-24B80317E82F}"
 	ProjectSection(SolutionItems) = preProject
-		..\lib\nanomsg\x64\libnanomsg.so = ..\lib\nanomsg\x64\libnanomsg.so
 		..\lib\nanomsg\x64\nanomsg.dll = ..\lib\nanomsg\x64\nanomsg.dll
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "x86", "x86", "{FBB18ACD-0675-4105-B4F8-FF042DE276C7}"
 	ProjectSection(SolutionItems) = preProject
-		..\lib\nanomsg\x86\libnanomsg.so = ..\lib\nanomsg\x86\libnanomsg.so
 		..\lib\nanomsg\x86\nanomsg.dll = ..\lib\nanomsg\x86\nanomsg.dll
 	EndProjectSection
 EndProject
