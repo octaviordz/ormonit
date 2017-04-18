@@ -107,15 +107,15 @@ let ctrlloop (config : IDictionary<string, string>) =
                         if nparts.Length > 0 then nparts.[0]
                         else String.Empty
             
-            sprintf "[%s] cmd \"%s\"." lid cmd |> log.Trace
+            sprintf "[%s] Command \"%s\"." lid cmd |> log.Trace
             match cmd with
             | "sys:client-key" -> 
-                log.Trace("[{0}] Sending client-key: '{1}'.", lid, config.["ckey"])
+                log.Trace("""[{0}] Sending client-key: "{1}".""", lid, config.["ckey"])
                 let encrypted = encrypt config.["publicKey"] config.["ckey"]
                 let note = Convert.ToBase64String(encrypted)
                 match Msg(lid.ToString(), note) |> send s with
                 | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                | Msg _ -> log.Trace("[{0}] Sent client-key: '{1}'.", lid, config.["ckey"])
+                | Msg _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])
                 recvloop()
             | "sys:report-status" -> 
                 log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)

@@ -638,7 +638,7 @@ let stop (ckey : Ctlkey) =
         let thjr = execc.thread.Join(5000)
         if execc.thread.ThreadState <> ThreadState.Stopped then 
             let m = 
-                (sprintf "[Stop Thread] Error waiting for master's exit. Master thread: %i." 
+                (sprintf "[Stop Thread] Error waiting for master exit. Master thread: %i." 
                      execc.thread.ManagedThreadId)
             log (Fatall m)
             execc.thread.Abort()

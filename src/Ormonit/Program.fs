@@ -177,7 +177,7 @@ let parseAndExecute argv : int =
                         p.WaitForExit()
                         ok
                     with ex -> 
-                        Errorl (sprintf "[Stop Process] Error waiting for master's exit. Master pid: %i." masterpid) 
+                        Errorl (sprintf "[Stop Process] Error waiting for master exit. Master pid: %i." masterpid) 
                         |> log
                         unknown
         elif parsedArgs.ContainsKey "notify" then 
