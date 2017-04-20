@@ -119,13 +119,13 @@ let ctrlloop (config : IDictionary<string, string>) =
                 recvloop()
             | "sys:report-status" -> 
                 log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                match Msg(lid, "ok") |> send s with
+                match Msg(config.["ckey"], "ok") |> send s with
                 | Error(errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
                 | _ -> ()
                 recvloop()
             | "sys:close" -> 
                 log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-                match Msg(lid, "closing") |> send s with
+                match Msg(config.["ckey"], "closing") |> send s with
                 | Error(errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
                 | _ -> ()
             | _ -> recvloop()
