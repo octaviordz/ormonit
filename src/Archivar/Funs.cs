@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace Archivar
 {
-    static class Func
+    static class Funs
     {
         static ILog log = LogProvider.GetLogger("Archivar");
         internal static void CopyFile(string source, string destination)

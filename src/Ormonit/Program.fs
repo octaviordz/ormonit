@@ -5,6 +5,7 @@ open System.Text
 open System.Threading
 open NNanomsg
 open Ormonit.Logging
+open Ormonit.Security
 
 let printUsage() = printfn @"
 Ormonit [options]
@@ -120,7 +121,7 @@ let parseAndExecute argv : int =
             elif running = 1 then unknown
             else ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "stop" then 
-            let note = "close"
+            let note = "sys:close"
             let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind

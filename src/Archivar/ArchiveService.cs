@@ -17,15 +17,20 @@ namespace Archivar
         {
         }
 
+        public string ReportStatus()
+        {
+            return "Ok";
+        }
+
         public Task RunAsync(ReportStatusToken reportStatusToken, CancellationToken cancellationToken)
         {
-            //TODO: Build ReportStatusToken
             var cwait = cancellationToken.WaitHandle;
             //%APPDATA%\Roaming\hamster-applet
             var p = Path.Combine(appData, "hamster-applet");
             var taskf = new TaskFactory();
             var result = Task.Run(() =>
             {
+                reportStatusToken.Register(ReportStatus);
                 using (var watcher = new FileSystemWatcher())
                 {
                     watcher.Path = p;
@@ -44,25 +49,13 @@ namespace Archivar
                     watcher.Created -= WatcherOnChanged;
                 }
             });
-            //reportStatusToken.Register();
             return result;
         }
 
         private void WatcherOnChanged(object sender, FileSystemEventArgs e)
         {
-            //    sprintf "\"%s\" event for %s" (e.ChangeType.ToString()) e.FullPath |> log.Info
-            //    if e.Name<> "hamster.db" then()
-            var destinationFullPath = "";
-            Func.CopyFile(e.FullPath, destinationFullPath);
-        //    let s = FileInfo(e.FullPath)
-        //    let d = FileInfo(destinationDbPath)
-        //    if d.LastWriteTimeUtc > s.LastWriteTimeUtc then
-        //        sprintf "Destination db \"%s\" has a more recent LastWriteTimeUtc than source. \"%s\" > \"%s\"" destinationDbPath(d.LastWriteTimeUtc.ToString("o")) (s.LastWriteTimeUtc.ToString("o"))
-        //        |> log.Warn
-        //        File.Copy(destinationDbPath, backupDbPath, true)
-        //    File.Copy(e.FullPath, destinationDbPath, true)
-        //    sprintf "Source \"%s\" copied to destination \"%s\"." e.FullPath destinationDbPath |> log.Trace
-        //    ()
+            var destinationFullPath = ;
+            Funs.CopyFile(e.FullPath, destinationFullPath);
         }
     }
 }

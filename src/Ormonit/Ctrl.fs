@@ -7,11 +7,11 @@ open System.Reflection
 open System.Diagnostics
 open System.Text
 open System.Collections.Generic
-open System.Security.Cryptography
 open NNanomsg
 open NLog
 open Ormonit
 open Ormonit.Logging
+open Ormonit.Security
 
 let maxOpenServices = 50
 let maxMessageSize = Comm.maxMessageSize
@@ -94,39 +94,6 @@ and tryagint tm f =
     | Choice2Of2 err -> 
         if DateTime.Now > tm then Choice2Of2 err
         else tryagint tm f
-
-let randomKey() = 
-    use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
-    let randomBytes = Array.zeroCreate 12
-    rngCryptoServiceProvider.GetBytes(randomBytes)
-    Convert.ToBase64String(randomBytes)
-
-let createAsymetricKeys() = 
-    let cspParams = CspParameters()
-    cspParams.ProviderType <- 1
-    use rsaProvider = new RSACryptoServiceProvider(1024, cspParams)
-    let publicKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(false))
-    let privateKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(true))
-    publicKey, privateKey
-
-//http://stackoverflow.com/questions/18850030/aes-256-encryption-public-and-private-key-how-can-i-generate-and-use-it-net
-let encrypt publicKey (data : string) : byte array = 
-    let cspParams = CspParameters()
-    cspParams.ProviderType <- 1
-    use rsaProvider = new RSACryptoServiceProvider(cspParams)
-    rsaProvider.ImportCspBlob(Convert.FromBase64String(publicKey))
-    let plain = Encoding.UTF8.GetBytes(data)
-    let encrypted = rsaProvider.Encrypt(plain, false)
-    encrypted
-
-let decrypt privateKey (encrypted : byte array) : string = 
-    let cspParams = CspParameters()
-    cspParams.ProviderType <- 1
-    use rsaProvider = new RSACryptoServiceProvider(cspParams)
-    rsaProvider.ImportCspBlob(Convert.FromBase64String(privateKey))
-    let bytes = rsaProvider.Decrypt(encrypted, false)
-    let plain = Encoding.UTF8.GetString(bytes, 0, bytes.Length)
-    plain
 
 let executeProcess (fileName : string) (arguments) (olog : NLog.Logger) = 
     let psi = ProcessStartInfo(fileName, arguments)
@@ -444,7 +411,7 @@ and waitFor (execc : Execc) (sok : int) (wl : ServiceData list) =
                 //Should we care if service process is still running?
                 let updatedSrv = { srv with closeTime = Some(DateTimeOffset.Now) }
                 execc.services.[lid] <- updatedSrv
-        System.Threading.Thread.CurrentThread.Join(superviseInterval/2) |> ignore
+        System.Threading.Thread.CurrentThread.Join(superviseInterval / 2) |> ignore
         waitFor execc sok nwl
 
 let executeSupervisor (execc : Execc) (socket) (nsocket) (msgs) : unit = 
@@ -638,9 +605,9 @@ let stop (ckey : Ctlkey) =
         let thjr = execc.thread.Join(5000)
         if execc.thread.ThreadState <> ThreadState.Stopped then 
             let m = 
-                (sprintf "[Stop Thread] Error waiting for master exit. Master thread: %i." 
-                     execc.thread.ManagedThreadId)
+                (sprintf "[Stop Thread] Error waiting for master exit. Master thread: %i." execc.thread.ManagedThreadId)
             log (Fatall m)
             execc.thread.Abort()
             unknown
         else ok
+

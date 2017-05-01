@@ -2,6 +2,9 @@
 
 open System
 open System.Reflection
+open System.Security.Cryptography
+open System.Text
+
 #if DNXCORE50
 
 type AssemblyLoader(folderPath) = 
@@ -84,3 +87,38 @@ module Logging =
         new(msg : string) = Fatall(null, asFunc (msg), [||])
     
     let log (logFormat : LogFormat<'T>) : unit = logf logFormat.LogLevel logFormat.MsgFunc logFormat.Exception [||]
+
+module Security =
+    let randomKey() = 
+        use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
+        let randomBytes = Array.zeroCreate 9
+        rngCryptoServiceProvider.GetBytes(randomBytes)
+        let r = Convert.ToBase64String(randomBytes)
+        r
+
+    let createAsymetricKeys() = 
+        let cspParams = CspParameters()
+        cspParams.ProviderType <- 1
+        use rsaProvider = new RSACryptoServiceProvider(1024, cspParams)
+        let publicKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(false))
+        let privateKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(true))
+        publicKey, privateKey
+
+    //http://stackoverflow.com/questions/18850030/aes-256-encryption-public-and-private-key-how-can-i-generate-and-use-it-net
+    let encrypt publicKey (data : string) : byte array = 
+        let cspParams = CspParameters()
+        cspParams.ProviderType <- 1
+        use rsaProvider = new RSACryptoServiceProvider(cspParams)
+        rsaProvider.ImportCspBlob(Convert.FromBase64String(publicKey))
+        let plain = Encoding.UTF8.GetBytes(data)
+        let encrypted = rsaProvider.Encrypt(plain, false)
+        encrypted
+
+    let decrypt privateKey (encrypted : byte array) : string = 
+        let cspParams = CspParameters()
+        cspParams.ProviderType <- 1
+        use rsaProvider = new RSACryptoServiceProvider(cspParams)
+        rsaProvider.ImportCspBlob(Convert.FromBase64String(privateKey))
+        let bytes = rsaProvider.Decrypt(encrypted, false)
+        let plain = Encoding.UTF8.GetString(bytes, 0, bytes.Length)
+        plain
