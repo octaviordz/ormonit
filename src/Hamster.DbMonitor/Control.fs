@@ -135,8 +135,8 @@ let Start(config : Map<string, string>) =
     Cli.addArg { Cli.arg with Option = "--logic-id"
                               Destination = "logicId" }
     let ca = config.["controlAddress"]
-    let lid = config.["logicId"]
-    if String.IsNullOrEmpty lid then raise (System.ArgumentException("logicId"))
+    let p, logicId = Int32.TryParse config.["logicId"]
+    if not p then raise (ArgumentException("locigId"))
     let ckey = randomKey()
     let nconfig = config.Add("ckey", ckey)
     //sprintf "Start with configuration %A" config |> log.Trace
