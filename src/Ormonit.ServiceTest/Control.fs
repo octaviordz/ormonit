@@ -158,11 +158,14 @@ let Start(config : Map<string, string>) =
     //let ckey = randomKey()
     let ckey = "0123456789AB"
     let p, logicId = Int32.TryParse config.["logicId"]
-    if not p then raise (System.ArgumentException("locigId"))
+    if not p then raise (ArgumentException("locigId"))
     lid <- logicId
-    log.Info("[{0}] Start. Current directory {1}", lid, Environment.CurrentDirectory)
-    let task = Task.Run(action)
     let nconfig = config.Add("ckey", ckey)
+    let smsg = sprintf "[%i] Start with configuration: %A." lid nconfig
+    log.Info(smsg)
+    log.Info("[{0}] Current directory {1}.", lid, Environment.CurrentDirectory)
+    let task = Task.Run(action)
+    ctrlloop nconfig
     ctrlloop nconfig
     log.Info("[{0}] Ormonit test exit control loop.", lid)
     lock mlock (fun () -> continu <- false)

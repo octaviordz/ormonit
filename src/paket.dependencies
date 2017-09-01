@@ -4,3 +4,4 @@ nuget LibLog
 nuget NLog
 nuget NNanomsg
 nuget Topshelf
+nuget System.ValueTuple

@@ -7,11 +7,12 @@ open System.Reflection
 open System.Diagnostics
 open System.Text
 open System.Collections.Generic
+open System.Security.Cryptography
 open NNanomsg
 open NLog
 open Ormonit
 open Ormonit.Logging
-open Ormonit.Security
+open Comm
 
 let maxOpenServices = 50
 let maxMessageSize = Comm.maxMessageSize
@@ -94,6 +95,46 @@ and tryagint tm f =
     | Choice2Of2 err -> 
         if DateTime.Now > tm then Choice2Of2 err
         else tryagint tm f
+
+let randomKey() = 
+    use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
+    let randomBytes = Array.zeroCreate 12
+    rngCryptoServiceProvider.GetBytes(randomBytes)
+    Convert.ToBase64String(randomBytes)
+
+let createAsymetricKeys() = 
+    let cspParams = CspParameters()
+    cspParams.ProviderType <- 1
+    use rsaProvider = new RSACryptoServiceProvider(1024, cspParams)
+    let publicKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(false))
+    let privateKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(true))
+    publicKey, privateKey
+
+//http://stackoverflow.com/questions/18850030/aes-256-encryption-public-and-private-key-how-can-i-generate-and-use-it-net
+let encrypt publicKey (data : string) : byte array = 
+    let cspParams = CspParameters()
+    cspParams.ProviderType <- 1
+    use rsaProvider = new RSACryptoServiceProvider(cspParams)
+    rsaProvider.ImportCspBlob(Convert.FromBase64String(publicKey))
+    let plain = Encoding.UTF8.GetBytes(data)
+    let encrypted = rsaProvider.Encrypt(plain, false)
+    encrypted
+
+let decrypt privateKey (encrypted : byte array) : string = 
+    let cspParams = CspParameters()
+    cspParams.ProviderType <- 1
+    use rsaProvider = new RSACryptoServiceProvider(cspParams)
+    rsaProvider.ImportCspBlob(Convert.FromBase64String(privateKey))
+    let bytes = rsaProvider.Decrypt(encrypted, false)
+    let plain = Encoding.UTF8.GetString(bytes, 0, bytes.Length)
+    plain
+
+let tryDecrypt privateKey (encrypted : byte array) : bool * string = 
+    try
+        let r = decrypt privateKey encrypted
+        true, r
+    with
+        | :? CryptographicException -> false, String.Empty
 
 let executeProcess (fileName : string) (arguments) (olog : NLog.Logger) = 
     let psi = ProcessStartInfo(fileName, arguments)
@@ -226,25 +267,36 @@ let rec closeTimedoutSrvs (timeoutMark : DateTimeOffset) (service : ServiceData)
                 | Some(n) -> closeTimedoutSrvs timeoutMark n execc
                 | None -> ()
 
-let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit = 
+let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit = 
     let mutable nmsgs = List.empty
     
-    let ckey, note = 
+    let matchTMsg tmsg msgf errorf = 
+        match tmsg with
+            | Comm.Error(errn, errm) -> errorf errn errm
+            | Comm.Msg(ckey, note) -> msgf ckey note
+
+    let ckey, note, envp = 
+        let emptyResult = String.Empty, String.Empty, Comm.EmptyEnvelop
+        let envpFrom ckey note = 
+            //let envp = Comm.Envelop(DateTimeOffset.Now, Comm.Msg(ckey, note))
+            let envp = 
+                { timeStamp = DateTimeOffset.Now
+                  msg = Comm.Msg(ckey, note) }
+            envp
         match msgs with
         | [] -> 
-            match Comm.recvWith nsok SendRecvFlags.DONTWAIT with
-            | Comm.Error(errn, errm) -> String.Empty, String.Empty
-            | Comm.Msg(ckey, note) -> 
-                log (Tracel(sprintf "Supervise recived note \"%s\"." note))
-                ckey, note
-        | msg :: tail -> 
+            let tmsg = Comm.recvWith nsok SendRecvFlags.DONTWAIT
+            let ismsg k n =
+                log (Tracel(sprintf "Supervise recived note \"%s\"." n))
+                k, n, (envpFrom k n)
+            matchTMsg tmsg ismsg (fun _ _ -> emptyResult)
+        | env :: tail -> 
             nmsgs <- tail
-            match msg with
-            | Comm.Error(errn, errm) -> String.Empty, String.Empty
-            | Comm.Msg(ckey, note) -> 
-                log (Tracel(sprintf "Supervise recived internal note \"%s\"." note))
-                ckey, note
-    
+            let ismsg k n =
+                log (Tracel(sprintf "Supervise recived internal note \"%s\"." n))
+                k, n, env
+            matchTMsg env.msg ismsg (fun _ _ -> emptyResult)
+
     let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
     
     let cmd = 
@@ -315,17 +367,27 @@ let rec supervise (sok) (nsok) (msgs : Comm.TMsg list) (execc : Execc) : unit =
         match Comm.recv sok with
         | Comm.Error(errn, errm) -> 
             log (Errorl(sprintf """Error %i on "client-key" (recv). %s.""" errn errm))
-            nmsgs <- Comm.Msg(ckey, note) :: nmsgs
+            let timeout = TimeSpan.FromMilliseconds(serviceTimeout)
+            let timeoutMark = DateTimeOffset.Now - timeout
+            let stale = 
+                if timeoutMark >= envp.timeStamp then Some envp
+                else None
+            match stale with
+            | None -> nmsgs <- envp :: nmsgs
+            | Some e ->
+                log (Errorl(sprintf """Stale message %A.""" e))
         | Comm.Msg(logicId, ekey) -> 
             let lid = Int32.Parse(logicId)
-            let clientKey = decrypt execc.privateKey (Convert.FromBase64String(ekey))
-            
+            let dr, clientKey = tryDecrypt execc.privateKey (Convert.FromBase64String(ekey))
             let vckey = 
                 match Array.tryItem lid execc.services with
                 | None -> false
                 | Some srv -> not (execc.lids.ContainsKey clientKey) && String.IsNullOrEmpty(srv.key)
-            if vckey then nexecc <- { execc with lids = execc.lids.Add(clientKey, lid) }
-            else 
+            let invalidKey = not (dr && vckey)
+            nexecc <- 
+                if dr && vckey then { execc with lids = execc.lids.Add(clientKey, lid) }
+                else execc
+            if invalidKey then
                 let n = String.Join(" ", Array.ofList ("sys:invalid-client-key" :: args))
                 Comm.Msg("", n)
                 |> Comm.send sok
@@ -411,7 +473,7 @@ and waitFor (execc : Execc) (sok : int) (wl : ServiceData list) =
                 //Should we care if service process is still running?
                 let updatedSrv = { srv with closeTime = Some(DateTimeOffset.Now) }
                 execc.services.[lid] <- updatedSrv
-        System.Threading.Thread.CurrentThread.Join(superviseInterval / 2) |> ignore
+        System.Threading.Thread.CurrentThread.Join(superviseInterval/2) |> ignore
         waitFor execc sok nwl
 
 let executeSupervisor (execc : Execc) (socket) (nsocket) (msgs) : unit = 
@@ -495,7 +557,9 @@ let openMaster (execc : Execc) =
                     log (Tracel cmdArgs)
                     let p = executeProcess ormonitFileName args olog
                     let note = sprintf "sys:init-service --logic-id %i" lid
-                    msgs <- List.append msgs [ Comm.Msg(execc.masterKey, note) ]
+                    msgs <- List.append msgs [
+                        { timeStamp = DateTimeOffset.Now
+                          msg = Comm.Msg(execc.masterKey, note) }]
                     let openTime = DateTimeOffset(p.StartTime)
                     execc.services.[lid] <- { ServiceData.Default with logicId = lid
                                                                        processId = p.Id
@@ -605,9 +669,9 @@ let stop (ckey : Ctlkey) =
         let thjr = execc.thread.Join(5000)
         if execc.thread.ThreadState <> ThreadState.Stopped then 
             let m = 
-                (sprintf "[Stop Thread] Error waiting for master exit. Master thread: %i." execc.thread.ManagedThreadId)
+                (sprintf "[Stop Thread] Error waiting for master exit. Master thread: %i." 
+                     execc.thread.ManagedThreadId)
             log (Fatall m)
             execc.thread.Abort()
             unknown
         else ok
-

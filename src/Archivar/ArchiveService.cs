@@ -54,8 +54,8 @@ namespace Archivar
 
         private void WatcherOnChanged(object sender, FileSystemEventArgs e)
         {
-            var destinationFullPath = ;
-            Funs.CopyFile(e.FullPath, destinationFullPath);
+            //var destinationFullPath = ;
+            //Funs.CopyFile(e.FullPath, destinationFullPath);
         }
     }
 }

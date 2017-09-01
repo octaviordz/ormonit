@@ -16,7 +16,16 @@ type TMsg =
 
 let Emptym = TMsg.Empty
 
-let serialize (msg : TMsg) = 
+type Envelop = 
+    { msg : TMsg
+      timeStamp : DateTimeOffset }
+    static member Empty = 
+        { msg = TMsg.Empty
+          timeStamp = DateTimeOffset.MinValue }
+
+let EmptyEnvelop = Envelop.Empty
+
+let serialize (msg : TMsg) : byte array = 
     match msg with
     | Error(errn, errm) -> [||]
     | Msg(ckey, note) -> 

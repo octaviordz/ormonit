@@ -4,7 +4,6 @@ open System
 open System.Reflection
 open System.Security.Cryptography
 open System.Text
-
 #if DNXCORE50
 
 type AssemblyLoader(folderPath) = 
@@ -87,7 +86,6 @@ module Logging =
         new(msg : string) = Fatall(null, asFunc (msg), [||])
     
     let log (logFormat : LogFormat<'T>) : unit = logf logFormat.LogLevel logFormat.MsgFunc logFormat.Exception [||]
-
 module Security =
     let randomKey() = 
         use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
@@ -103,7 +101,6 @@ module Security =
         let publicKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(false))
         let privateKey = Convert.ToBase64String(rsaProvider.ExportCspBlob(true))
         publicKey, privateKey
-
     //http://stackoverflow.com/questions/18850030/aes-256-encryption-public-and-private-key-how-can-i-generate-and-use-it-net
     let encrypt publicKey (data : string) : byte array = 
         let cspParams = CspParameters()
