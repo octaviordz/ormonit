@@ -9,7 +9,7 @@ open System.Text
 open System.Threading
 open System.Threading.Tasks
 open System.Security.Cryptography
-open NNanomsg
+open Cilnn
 open Comm
 
 let log = LogManager.GetLogger "Ormonit.Test"
@@ -61,10 +61,10 @@ let randomKey() =
 let private ctrlloop (config : Map<string, string>) = 
     let ca = config.["controlAddress"]
     sprintf "[%i] Ormonit test in control loop with" lid |> log.Trace
-    let s = NN.Socket(Domain.SP, Protocol.RESPONDENT)
+    let s = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
     //TODO:error handling for socket and connect
     assert (s >= 0)
-    let eid = NN.Connect(s, ca)
+    let eid = Nn.Connect(s, ca)
     assert (eid >= 0)
     let rec recvloop() = 
         //let mutable buff : byte[] = null '\000'
@@ -134,8 +134,8 @@ let private ctrlloop (config : Map<string, string>) =
                 recvloop()
             | _ -> recvloop()
     recvloop()
-    assert (NN.Shutdown(s, eid) = 0)
-    assert (NN.Close(s) = 0)
+    assert (Nn.Shutdown(s, eid) = 0)
+    assert (Nn.Close(s) = 0)
 
 let rec private action() = 
     //log.Trace("[{0}] Ormonit test action enter", lid)

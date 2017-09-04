@@ -63,6 +63,9 @@
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Cilnn">
+      <HintPath>..\Cilnn\bin\Debug\netstandard1.6\Cilnn.dll</HintPath>
+    </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core">
       <Name>FSharp.Core</Name>

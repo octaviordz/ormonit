@@ -77,6 +77,9 @@
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Cilnn">
+      <HintPath>..\Cilnn\bin\Debug\netstandard1.6\Cilnn.dll</HintPath>
+    </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core">
       <Name>FSharp.Core</Name>
@@ -85,9 +88,6 @@
     </Reference>
     <Reference Include="NLog">
       <HintPath>..\packages\NLog\lib\net45\NLog.dll</HintPath>
-    </Reference>
-    <Reference Include="NNanomsg">
-      <HintPath>..\..\lib\NNanomsg\NNanomsg.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
