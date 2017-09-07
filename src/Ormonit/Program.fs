@@ -3,7 +3,7 @@ open System
 open System.IO
 open System.Text
 open System.Threading
-open NNanomsg
+open Cilnn
 open Ormonit.Logging
 open Ormonit.Security
 
@@ -122,13 +122,13 @@ let parseAndExecute argv : int =
             else ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "stop" then 
             let note = "sys:close"
-            let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
+            let nsocket = Nn.Socket(Domain.SP, Protocol.PAIR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)
-            assert (NN.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
-            assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
-            let eid = NN.Connect(nsocket, notifyAddress)
+            assert (Nn.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
+            assert (Nn.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
+            let eid = Nn.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
             log (Tracel (sprintf "[Stop Process] Notify \"%s\"." note))
             let send() = Comm.send nsocket (Comm.Msg("", note))
@@ -166,8 +166,8 @@ let parseAndExecute argv : int =
             else 
                 Warnl (sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
                 |> log
-            NN.Shutdown(nsocket, eid) |> ignore
-            NN.Close(nsocket) |> ignore
+            Nn.Shutdown(nsocket, eid) |> ignore
+            Nn.Close(nsocket) |> ignore
             if errn <> ok then unknown
             else 
                 //TODO:IMPORTANT: check process identity
@@ -183,13 +183,13 @@ let parseAndExecute argv : int =
                         unknown
         elif parsedArgs.ContainsKey "notify" then 
             let note = parsedArgs.["notify"]
-            let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
+            let nsocket = Nn.Socket(Domain.SP, Protocol.PAIR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)
-            assert (NN.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
-            assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
-            let eid = NN.Connect(nsocket, notifyAddress)
+            assert (Nn.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
+            assert (Nn.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
+            let eid = Nn.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
             log (Tracel (sprintf "Notify \"%s\" (notify process)." note))
             let bytes = Encoding.UTF8.GetBytes(note)
@@ -214,8 +214,8 @@ let parseAndExecute argv : int =
                     log (Warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             if masterpid <> -1 then 
                 log (Infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
-            NN.Shutdown(nsocket, eid) |> ignore
-            NN.Close(nsocket) |> ignore
+            Nn.Shutdown(nsocket, eid) |> ignore
+            Nn.Close(nsocket) |> ignore
             ok
         elif parsedArgs.ContainsKey "openMaster" then 
             let pubkey, prikey = createAsymetricKeys()

@@ -1,11 +1,8 @@
 ﻿module internal Comm
 
 open System
-open System.IO
-open System.Reflection
-open System.Diagnostics
 open System.Text
-open NNanomsg
+open Cilnn
 
 let maxMessageSize = 256
 
@@ -65,10 +62,10 @@ let deserialize (nbytes) (bytes : byte array) =
     Msg(ckey, note)
 
 let sendWith (sok) (flags) (msg : TMsg) = 
-    let nbytes = NN.Send(sok, (serialize msg), flags)
+    let nbytes = Nn.Send(sok, (serialize msg), flags)
     if nbytes < 0 then 
-        let errn = NN.Errno()
-        let errm = NN.StrError(NN.Errno())
+        let errn = Nn.Errno()
+        let errm = Nn.StrError(Nn.Errno())
         Error(errn, errm)
     else msg
 
@@ -76,10 +73,10 @@ let send (sok) (msg : TMsg) = sendWith sok SendRecvFlags.NONE msg
 
 let recvWith (sok) (flags) = 
     let buff = Array.zeroCreate maxMessageSize
-    let nbytes = NN.Recv(sok, buff, flags)
+    let nbytes = Nn.Recv(sok, buff, flags)
     if nbytes < 0 then 
-        let errn = NN.Errno()
-        let errm = NN.StrError(NN.Errno())
+        let errn = Nn.Errno()
+        let errm = Nn.StrError(Nn.Errno())
         Error(errn, errm)
     else deserialize nbytes buff
 

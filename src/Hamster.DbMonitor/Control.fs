@@ -7,7 +7,7 @@ open NLog.Layouts
 open System.Collections.Generic
 open System.Text
 open System.Security.Cryptography
-open NNanomsg
+open Cilnn
 open Comm
 
 let destinationDbPath = @"W:\Dropbox\rts\hamster.db"
@@ -72,10 +72,10 @@ let ctrlloop (config : IDictionary<string, string>) =
     let ca = config.["controlAddress"]
     let lid = config.["logicId"]
     sprintf "In control loop with: controlAddress \"%s\", logicId \"%s\"." ca lid |> log.Trace
-    let s = NN.Socket(Domain.SP, Protocol.RESPONDENT)
+    let s = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
     //TODO:error handling for socket and connect
     assert (s >= 0)
-    assert (NN.Connect(s, ca) >= 0)
+    assert (Nn.Connect(s, ca) >= 0)
     let rec recvloop() = 
         log.Info("Waiting for note.")
         match recv s with

@@ -8,7 +8,7 @@ open System.Diagnostics
 open System.Text
 open System.Collections.Generic
 open System.Security.Cryptography
-open NNanomsg
+open Cilnn
 open NLog
 open Ormonit
 open Ormonit.Logging
@@ -189,8 +189,8 @@ let requestStatus (lid : int32) socket =
     let bytes = Array.zeroCreate 5
     Buffer.BlockCopy(BitConverter.GetBytes(lid), 0, bytes, 0, 4)
     Buffer.BlockCopy(cbytes, 4, bytes, 0, cbytes.Length)
-    let sr = NN.Send(socket, bytes, SendRecvFlags.NONE)
-    //TODO:Error handling NN.Errno ()
+    let sr = Nn.Send(socket, bytes, SendRecvFlags.NONE)
+    //TODO:Error handling Nn.Errno ()
     assert (sr >= 0)
 
 let collectStatus (config : Map<string, string>) socket = 
@@ -198,9 +198,9 @@ let collectStatus (config : Map<string, string>) socket =
     log (Tracel(sprintf "CollectStatus: controlAddress \"%s\"." ca))
     //let mutable buff : byte[] = null
     let buff : byte array = Array.zeroCreate maxMessageSize
-    let rc = NN.Recv(socket, buff, SendRecvFlags.DONTWAIT)
+    let rc = Nn.Recv(socket, buff, SendRecvFlags.DONTWAIT)
     if rc < 0 then 
-        log (Warnl(sprintf "Unable to collect status. NN.Errno %s" (NN.StrError(NN.Errno()))))
+        log (Warnl(sprintf "Unable to collect status. Nn.Errno %s" (Nn.StrError(Nn.Errno()))))
         config
     else 
         let cmd = Encoding.UTF8.GetString(buff.[..rc - 1])
@@ -488,13 +488,13 @@ let openMaster (execc : Execc) =
     let ok = 0
     let unknown = Int32.MaxValue
     log (Infol "Master starting.")
-    let nsok = NN.Socket(Domain.SP, Protocol.PAIR)
+    let nsok = Nn.Socket(Domain.SP, Protocol.PAIR)
     //TODO:error handling for socket and bind
     assert (nsok >= 0)
-    assert (NN.SetSockOpt(nsok, SocketOption.SNDTIMEO, 1000) = 0)
-    assert (NN.SetSockOpt(nsok, SocketOption.RCVTIMEO, 1000) = 0)
-    assert (NN.SetSockOpt(nsok, SocketOption.RCVBUF, 262144) = 0)
-    let eidp = NN.Connect(nsok, notifyAddress)
+    assert (Nn.SetSockOpt(nsok, SocketOption.SNDTIMEO, 1000) = 0)
+    assert (Nn.SetSockOpt(nsok, SocketOption.RCVTIMEO, 1000) = 0)
+    assert (Nn.SetSockOpt(nsok, SocketOption.RCVBUF, 262144) = 0)
+    let eidp = Nn.Connect(nsok, notifyAddress)
     let mutable isMasterRunning = false
     if eidp >= 0 then 
         match Comm.Msg("", "sys:is-master") |> Comm.send nsok with
@@ -514,14 +514,14 @@ let openMaster (execc : Execc) =
             match Comm.recv nsok with
             | Comm.Msg _ -> isMasterRunning <- true
             | Comm.Error(errn, errm) -> ()
-    NN.Shutdown(nsok, eidp) |> ignore
+    Nn.Shutdown(nsok, eidp) |> ignore
     if isMasterRunning then 
         log (Warnl(sprintf "Master is already running. Terminating."))
         execc.state <- "term"
-        NN.Close(nsok) |> ignore
+        Nn.Close(nsok) |> ignore
         ok
     else 
-        let socket = NN.Socket(Domain.SP, Protocol.SURVEYOR)
+        let socket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
         //TODO: error handling for socket and bind
         assert (socket >= 0)
         let curp = System.Diagnostics.Process.GetCurrentProcess()
@@ -533,15 +533,15 @@ let openMaster (execc : Execc) =
                                                          openTime = openTime
                                                          fileName = curp.MainModule.FileName }
         let ca = config.["controlAddress"]
-        let eid = NN.Bind(socket, ca)
-        let eidp = NN.Bind(nsok, notifyAddress)
+        let eid = Nn.Bind(socket, ca)
+        let eidp = Nn.Bind(nsok, notifyAddress)
         assert (eid >= 0)
         assert (eidp >= 0)
         //TODO: Check for already running ormonit services in case master is interrupted/killed externally
         //config <- RequestStatus config socket
         //config <- CollectStatus config q socket
-        //let sr = NN.Send(socket, Encoding.UTF8.GetBytes("close"), SendRecvFlags.NONE)
-        //TODO:Error handling NN.Errno ()
+        //let sr = Nn.Send(socket, Encoding.UTF8.GetBytes("close"), SendRecvFlags.NONE)
+        //TODO:Error handling Nn.Errno ()
         //assert (sr >= 0)
         let mutable msgs = List.empty
         let index = 1
@@ -570,13 +570,13 @@ let openMaster (execc : Execc) =
                                                                                         else "service") ca))
         execc.state <- "started"
         executeSupervisor execc socket nsok msgs
-        assert (NN.Shutdown(socket, eid) = 0)
-        assert (NN.Shutdown(nsok, eidp) = 0)
-        assert (NN.Close(socket) = 0)
-        assert (NN.Close(nsok) = 0)
+        assert (Nn.Shutdown(socket, eid) = 0)
+        assert (Nn.Shutdown(nsok, eidp) = 0)
+        assert (Nn.Close(socket) = 0)
+        assert (Nn.Close(nsok) = 0)
         log (Infol "Master stopped.")
         execc.state <- "stopped"
-        NN.Term()
+        Nn.Term()
         ok
 
 let private shash = Dictionary<string, Execc>()
@@ -629,13 +629,13 @@ let stop (ckey : Ctlkey) =
     let execc = shash.[ckey.key]
     let na = execc.config.["notifyAddress"]
     let note = "sys:close"
-    let nsocket = NN.Socket(Domain.SP, Protocol.PAIR)
+    let nsocket = Nn.Socket(Domain.SP, Protocol.PAIR)
     let buff : byte array = Array.zeroCreate maxMessageSize
     //TODO:error handling for socket and bind
     assert (nsocket >= 0)
-    assert (NN.SetSockOpt(nsocket, SocketOption.SNDTIMEO, superviseInterval * 5) = 0)
-    assert (NN.SetSockOpt(nsocket, SocketOption.RCVTIMEO, superviseInterval * 5) = 0)
-    let eid = NN.Connect(nsocket, notifyAddress)
+    assert (Nn.SetSockOpt(nsocket, SocketOption.SNDTIMEO, superviseInterval * 5) = 0)
+    assert (Nn.SetSockOpt(nsocket, SocketOption.RCVTIMEO, superviseInterval * 5) = 0)
+    let eid = Nn.Connect(nsocket, notifyAddress)
     assert (eid >= 0)
     log (Tracel(sprintf "[Stop Thread] Notify \"%s\"." note))
     let sendr = 
@@ -660,8 +660,8 @@ let stop (ckey : Ctlkey) =
             log (Warnl(sprintf "[Stop Thread] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
     if masterpid <> -1 then 
         log (Infol(sprintf "[Stop Thread] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
-    NN.Shutdown(nsocket, eid) |> ignore
-    NN.Close(nsocket) |> ignore
+    Nn.Shutdown(nsocket, eid) |> ignore
+    Nn.Close(nsocket) |> ignore
     //TODO: masterpid needed?
     if masterpid = -1 then unknown
     else 

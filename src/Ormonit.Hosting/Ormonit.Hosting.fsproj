@@ -51,7 +51,9 @@
   <Import Project="$(FSharpTargetsPath)" />
   <ItemGroup>
     <Compile Include="AssemblyInfo.fs" />
-    <Compile Include="..\Ormonit\Infrastructure.fs" />
+    <Compile Include="..\Ormonit\Infrastructure.fs">
+      <Link>Infrastructure.fs</Link>
+    </Compile>
     <Compile Include="..\Ormonit\Comm.fs">
       <Link>Comm.fs</Link>
     </Compile>
@@ -65,6 +67,9 @@
     <None Include="paket.references" />
   </ItemGroup>
   <ItemGroup>
+    <Reference Include="Cilnn">
+      <HintPath>..\Cilnn\bin\Debug\netstandard1.6\Cilnn.dll</HintPath>
+    </Reference>
     <Reference Include="mscorlib" />
     <Reference Include="FSharp.Core, Version=$(TargetFSharpCoreVersion), Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a">
       <Private>True</Private>
