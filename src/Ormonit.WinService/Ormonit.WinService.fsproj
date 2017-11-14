@@ -69,6 +69,9 @@
     <Compile Include="..\Ormonit\Comm.fs">
       <Link>Comm.fs</Link>
     </Compile>
+    <Compile Include="..\Ormonit\Cli.fs">
+      <Link>Cli.fs</Link>
+    </Compile>
     <Compile Include="..\Ormonit\Ctrl.fs">
       <Link>Ctrl.fs</Link>
     </Compile>

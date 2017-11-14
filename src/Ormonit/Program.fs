@@ -71,6 +71,12 @@ let parseAndExecute argv : int =
                               Destination = "logicId" }
     Cli.addArg { Cli.arg with Option = "--public-key"
                               Destination = "publicKey" }
+    Cli.addArg { Cli.arg with Option = "-pid"
+                              LongOption = "--process-id"
+                              Destination = "processId" }
+    Cli.addArg { Cli.arg with Option = "-pstartt"
+                              LongOption = "--process-start-time"
+                              Destination = "processStartTime" }
     match Cli.parseArgs argv with
     | Choice2Of2(exn) -> 
         printUsage()
@@ -122,7 +128,7 @@ let parseAndExecute argv : int =
             else ok
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "stop" then 
             let note = "sys:close"
-            let nsocket = Nn.Socket(Domain.SP, Protocol.PAIR)
+            let nsocket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)
@@ -183,7 +189,7 @@ let parseAndExecute argv : int =
                         unknown
         elif parsedArgs.ContainsKey "notify" then 
             let note = parsedArgs.["notify"]
-            let nsocket = Nn.Socket(Domain.SP, Protocol.PAIR)
+            let nsocket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)

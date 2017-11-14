@@ -19,7 +19,7 @@ namespace Archivar
 
         public string ReportStatus()
         {
-            return "Ok";
+            return "ok";
         }
 
         public Task RunAsync(ReportStatusToken reportStatusToken, CancellationToken cancellationToken)
@@ -48,6 +48,14 @@ namespace Archivar
                     watcher.Changed -= WatcherOnChanged;
                     watcher.Created -= WatcherOnChanged;
                 }
+            });
+            return result;
+        }
+
+        public Task RunAsync()
+        {
+            var result = Task.Run(() =>
+            {
             });
             return result;
         }

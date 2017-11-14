@@ -268,6 +268,7 @@ let rec closeTimedoutSrvs (timeoutMark : DateTimeOffset) (service : ServiceData)
                 | None -> ()
 
 let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit = 
+    let now = DateTimeOffset.Now
     let mutable nmsgs = List.empty
     
     let matchTMsg tmsg msgf errorf = 
@@ -280,7 +281,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit
         let envpFrom ckey note = 
             //let envp = Comm.Envelop(DateTimeOffset.Now, Comm.Msg(ckey, note))
             let envp = 
-                { timeStamp = DateTimeOffset.Now
+                { timeStamp = now
                   msg = Comm.Msg(ckey, note) }
             envp
         match msgs with
@@ -290,12 +291,12 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit
                 log (Tracel(sprintf "Supervise recived note \"%s\"." n))
                 k, n, (envpFrom k n)
             matchTMsg tmsg ismsg (fun _ _ -> emptyResult)
-        | env :: tail -> 
+        | head :: tail -> 
             nmsgs <- tail
             let ismsg k n =
                 log (Tracel(sprintf "Supervise recived internal note \"%s\"." n))
-                k, n, env
-            matchTMsg env.msg ismsg (fun _ _ -> emptyResult)
+                k, n, head
+            matchTMsg head.msg ismsg (fun _ _ -> emptyResult)
 
     let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
     
@@ -307,7 +308,10 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit
         List.ofArray (if nparts.Length > 1 then nparts.[1..]
                       else [||])
     
-    //let parsed = Cli.parseArgs args
+    match Cli.parseArgs (Array.ofList args) with 
+    | Choice2Of2 _ -> supervise sok nsok nmsgs execc
+    | Choice1Of2 parsedArgs -> 
+
     match cmd with
     | "sys:is-master" -> 
         match Comm.Msg("", "master") |> Comm.sendWith nsok SendRecvFlags.DONTWAIT with
@@ -393,9 +397,58 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit
                 |> Comm.send sok
                 |> ignore
         supervise sok nsok nmsgs nexecc
+    | "sys:self-init" -> 
+        if not (parsedArgs.ContainsKey "processId") then 
+            Errorl("""No processId in "self-init" note.""") |> log
+        if not (parsedArgs.ContainsKey "processId") then 
+            Errorl("""No processStartTime in "self-init" note.""") |> log
+        let isValidArgs =
+            parsedArgs.ContainsKey "processId"
+            && parsedArgs.ContainsKey "processStartTime"
+        if not isValidArgs then 
+            supervise sok nsok msgs execc
+        else 
+        
+        let pidr, pid = Int32.TryParse (parsedArgs.["processId"])
+        let ptr, pt = DateTime.TryParse (parsedArgs.["processStartTime"])
+        match pidr, ptr, pid, pt with 
+        | false, false, _, _ -> 
+            Errorl("""Invalid processId in "self-init" note.""") |> log
+            Errorl("""Invalid processStartTime in "self-init" note.""") |> log
+            supervise sok nsok msgs execc
+        | false, true, _, _ -> 
+            Errorl("""Invalid processId in "self-init" note.""") |> log
+            supervise sok nsok msgs execc
+        | true, false, _, _ -> 
+            Errorl("""Invalid processStartTime in "self-init" note.""") |> log
+            supervise sok nsok msgs execc
+        | true, true, pid, pt -> 
+
+        let index = 
+            execc.services
+            |> Array.tryFindIndex (fun it -> it = ServiceData.Default )
+        match index with 
+        | None -> Errorl("Services limit reached.") |> log
+        | Some lid -> 
+            let n = sprintf "sys:resp:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s" lid pid execc.publicKey controlAddress
+            match Comm.Msg(String.Empty, n) |> Comm.send nsok with
+            | Comm.Msg _ -> 
+                log (Tracel(sprintf """Sent "resp:self-init" note."""))
+                let n = sprintf "sys:init-service --logic-id %i" lid
+                let initenvp = 
+                    { timeStamp = DateTimeOffset.Now
+                      msg = Comm.Msg(execc.masterKey, n) }
+                nmsgs <- initenvp :: msgs
+                //nmsgs <- List.append msgs [initenvp]
+                execc.services.[lid] <- { ServiceData.Default with logicId = lid
+                                                                   processId = pid
+                                                                   openTime = DateTimeOffset(pt) }
+            | Comm.Error(errn, errm) -> 
+                log (Errorl(sprintf """Error %i on "resp:self-init" (send). %s.""" errn errm))
+            supervise sok nsok nmsgs execc
     | _ -> 
         log (Tracel "Requesting report-status.")
-        match Comm.Msg("", "sys:report-status") |> Comm.send sok with
+        match Comm.Msg(String.Empty, "sys:report-status") |> Comm.send sok with
         | Comm.Error(errn, errm) -> log <| Warnl(sprintf """Error %i on "report-status" (send). %s.""" errn errm)
         | _ -> 
             match Comm.recv sok with
@@ -405,9 +458,9 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit
                 | None -> 
                     log 
                         (Warnl
-                             (sprintf """Reply "report-status" from unknown service [%s] status code %s.""" ckey status))
+                             (sprintf """Reply "report-status" from unknown service [%s] status code "%s".""" ckey status))
                 | Some lid -> 
-                    log <| Tracel(sprintf """Reply "report-status" from [%i] status code %s.""" lid status)
+                    log <| Tracel(sprintf """Reply "report-status" from [%i] status code "%s".""" lid status)
                     assert (lid > 0)
                     assert (lid < execc.services.Length)
                     let srv = execc.services.[lid]
@@ -476,9 +529,9 @@ and waitFor (execc : Execc) (sok : int) (wl : ServiceData list) =
         System.Threading.Thread.CurrentThread.Join(superviseInterval/2) |> ignore
         waitFor execc sok nwl
 
-let executeSupervisor (execc : Execc) (socket) (nsocket) (msgs) : unit = 
+let executeSupervisor (execc : Execc) (ctrlsok) (nsocket) (msgs) : unit = 
     log (Debugl "Start supervisor.")
-    supervise socket nsocket msgs execc
+    supervise ctrlsok nsocket msgs execc
     traceState execc.services
     //TODO:Wait for process exit
     log (Debugl "Supervisor stop.")
@@ -488,7 +541,7 @@ let openMaster (execc : Execc) =
     let ok = 0
     let unknown = Int32.MaxValue
     log (Infol "Master starting.")
-    let nsok = Nn.Socket(Domain.SP, Protocol.PAIR)
+    let nsok = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
     //TODO:error handling for socket and bind
     assert (nsok >= 0)
     assert (Nn.SetSockOpt(nsok, SocketOption.SNDTIMEO, 1000) = 0)
@@ -515,12 +568,13 @@ let openMaster (execc : Execc) =
             | Comm.Msg _ -> isMasterRunning <- true
             | Comm.Error(errn, errm) -> ()
     Nn.Shutdown(nsok, eidp) |> ignore
+    Nn.Close(nsok) |> ignore
     if isMasterRunning then 
         log (Warnl(sprintf "Master is already running. Terminating."))
         execc.state <- "term"
-        Nn.Close(nsok) |> ignore
         ok
     else 
+        let nsok = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
         let socket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
         //TODO: error handling for socket and bind
         assert (socket >= 0)
@@ -548,7 +602,7 @@ let openMaster (execc : Execc) =
         let mutable last = 1
         let asms = loadServices config Environment.CurrentDirectory
         asms |> List.iteri (fun i it -> 
-                    let ckey = randomKey()
+                    //let ckey = randomKey()
                     let lid = index + i
                     let args = 
                         sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" lid execc.publicKey 
@@ -629,7 +683,7 @@ let stop (ckey : Ctlkey) =
     let execc = shash.[ckey.key]
     let na = execc.config.["notifyAddress"]
     let note = "sys:close"
-    let nsocket = Nn.Socket(Domain.SP, Protocol.PAIR)
+    let nsocket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
     let buff : byte array = Array.zeroCreate maxMessageSize
     //TODO:error handling for socket and bind
     assert (nsocket >= 0)

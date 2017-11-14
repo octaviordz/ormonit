@@ -28,6 +28,10 @@ fileTarget.ArchiveNumbering <- Targets.ArchiveNumberingMode.DateAndSequence
 fileTarget.ArchiveAboveSize <- 524288L
 fileTarget.MaxArchiveFiles <- 2
 fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
+fileTarget.KeepFileOpen <- true
+fileTarget.OpenFileCacheTimeout <- 10
+fileTarget.ConcurrentWrites  <- false
+
 
 let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)
 
@@ -66,6 +70,7 @@ let private ctrlloop (config : Map<string, string>) =
     assert (s >= 0)
     let eid = Nn.Connect(s, ca)
     assert (eid >= 0)
+    let random = Random()
     let rec recvloop() = 
         //let mutable buff : byte[] = null '\000'
         //log.Info("[{0}] Ormonit test receive (blocking).", lid)
@@ -114,8 +119,8 @@ let private ctrlloop (config : Map<string, string>) =
                 | Msg _ -> ()
             //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
             | "sys:report-status" -> 
-                let rand = Random().NextDouble()
-                if rand > 0.8 then 
+                let uncertainty = random.NextDouble()
+                if uncertainty > 0.2 then 
                     //log.Trace("""[{0}] Processing "report-status" command.""", lid)
                     log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
                     match Msg(config.["ckey"], "ok") |> send s with
@@ -165,7 +170,6 @@ let Start(config : Map<string, string>) =
     log.Info(smsg)
     log.Info("[{0}] Current directory {1}.", lid, Environment.CurrentDirectory)
     let task = Task.Run(action)
-    ctrlloop nconfig
     ctrlloop nconfig
     log.Info("[{0}] Ormonit test exit control loop.", lid)
     lock mlock (fun () -> continu <- false)

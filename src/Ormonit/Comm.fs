@@ -4,11 +4,13 @@ open System
 open System.Text
 open Cilnn
 
-let maxMessageSize = 256
+let maxMessageSize = 512
 
+type Error = int32 * string
+/// Transmission message
 type TMsg = 
     | Msg of string * string
-    | Error of int32 * string
+    | Error of Error
     static member Empty = Msg(String.Empty, String.Empty)
 
 let Emptym = TMsg.Empty
@@ -42,6 +44,7 @@ let serialize (msg : TMsg) : byte array =
 
 let deserialize (nbytes) (bytes : byte array) = 
     let msize = BitConverter.ToInt32(bytes, 0)
+    //TODO: Check maxMessageSize
     let ksize = int32 (BitConverter.ToInt16(bytes, 4))
     
     let kendi = 

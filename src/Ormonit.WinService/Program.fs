@@ -8,7 +8,6 @@ open NLog.Layouts
 open Ormonit.Logging
 
 let ormonitFileName = Path.Combine(Environment.CurrentDirectory, "Ormonit")
-let private ckey = Ctrl.makeMaster ()
 
 let nlog = NLog.LogManager.GetLogger "Ormonit.WinService"
 let olog = NLog.LogManager.GetLogger "_Ormonit.Output_"
@@ -49,7 +48,9 @@ Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
 
 
 [<EntryPoint>]
-let main argv =
+let main argv = 
+    let ckey = Ctrl.makeMaster ()
+
     let start hc =
         0 = Ctrl.start ckey
 

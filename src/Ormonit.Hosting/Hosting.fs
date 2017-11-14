@@ -1,16 +1,16 @@
 ﻿namespace Ormonit.Hosting
 
+open Cilnn
+open Comm
 open System
 open NLog
 open NLog.Layouts
+open Ormonit.Security
+open Ormonit
 open System.Collections.Generic
-open System.Text
 open System.Threading
 open System.Threading.Tasks
-open System.Security.Cryptography
-open NNanomsg
-open Comm
-open Ormonit.Security
+open System.Diagnostics
 
 module internal Host = 
     let log = LogManager.GetLogger "Ormonit.Hosting"
@@ -30,14 +30,27 @@ module internal Host =
     fileTarget.MaxArchiveFiles <- 2
     fileTarget.ArchiveDateFormat <- "yyyy-MM-dd"
     
-    let rule1 = new NLog.Config.LoggingRule("*", LogLevel.Trace, consoleTarget)
+    let rule1 = new NLog.Config.LoggingRule("*", NLog.LogLevel.Trace, consoleTarget)
     
     logConfig.LoggingRules.Add(rule1)
     
-    let rule2 = new NLog.Config.LoggingRule("*", LogLevel.Trace, fileTarget)
+    let rule2 = new NLog.Config.LoggingRule("*", NLog.LogLevel.Trace, fileTarget)
     
     logConfig.LoggingRules.Add(rule2)
     LogManager.Configuration <- logConfig
+
+    Cli.addArg { Cli.arg with Option = "-pid"
+                              LongOption = "--process-id"
+                              Destination = "processId" }
+    Cli.addArg { Cli.arg with Option = "-pstartt"
+                              LongOption = "--process-start-time"
+                              Destination = "processStartTime" }
+    Cli.addArg { Cli.arg with Option = "--ctrl-address"
+                              Destination = "controlAddress" }
+    Cli.addArg { Cli.arg with Option = "--logic-id"
+                              Destination = "logicId" }
+    Cli.addArg { Cli.arg with Option = "--public-key"
+                              Destination = "publicKey" }
 
 [<Struct>]
 type ReportStatusToken = 
@@ -62,11 +75,11 @@ and ReportStatusTokenSource() =
 type ServiceData = 
     { state : string
       task : Task
-      rtsrc : ReportStatusTokenSource }
+      reportStatusTokenSource : ReportStatusTokenSource }
     static member None = 
         { state = String.Empty
           task = Unchecked.defaultof<Task>
-          rtsrc = Unchecked.defaultof<ReportStatusTokenSource> }
+          reportStatusTokenSource = Unchecked.defaultof<ReportStatusTokenSource> }
 
 type ServiceHost() = 
     let mutable ts = List.empty
@@ -80,11 +93,130 @@ type ServiceHost() =
     
     member s.Run() : unit = 
         let mutable rtsrcs = List.empty<ReportStatusTokenSource>
-        let mutable publicKey = String.Empty
-        let mutable lid = "host"
         let emptyDic = Dictionary<string, string>()
-        let ca = Ctrl.controlAddress
-        let (?) (t : Type) (mname : string) = t.GetMethod(mname)
+        let (?) (t : Type) (mname : string) = t.GetMethod(mname, [| typeof<ReportStatusToken>; typeof<CancellationToken> |])
+        let matchTMsg tmsg onmsgf onerrorf = 
+            match tmsg with
+                | Comm.Error err -> onerrorf err
+                | Comm.Msg(ckey, note) -> onmsgf ckey note
+
+        //sprintf "[%i] Ormonit test in control loop with" lid |> log.Trace
+        let nsok = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
+        //TODO:error handling for socket and bind
+        assert (nsok >= 0)
+        assert (Nn.SetSockOpt(nsok, SocketOption.SURVEYOR_DEADLINE, Ctrl.superviseInterval / 2) = 0)
+        assert (Nn.SetSockOpt(nsok, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 10) = 0)
+        assert (Nn.SetSockOpt(nsok, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 10) = 0)
+        let eid = Nn.Connect(nsok, Ctrl.notifyAddress)
+        assert (eid >= 0)
+        let cprocess = Process.GetCurrentProcess()
+        let mutable lid = cprocess.Id
+        let note = sprintf "sys:self-init --process-id %d --process-start-time %s" cprocess.Id (cprocess.StartTime.ToString("o"))
+        let notyMaster() = 
+            match Comm.sendWith nsok SendRecvFlags.NONE (Comm.Msg(String.Empty, note)) with
+            | Comm.Error(errn, errm) -> 
+                match errn with
+                | 156384766 -> 
+                    sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm |> log.Warn
+                | _ -> 
+                    sprintf """Error %i on "self-init" (send). %s.""" errn errm |> log.Warn
+                Choice2Of2(errn, errm)
+            | r -> 
+                match Comm.recv nsok with
+                | Comm.Error(errn, errm)-> 
+                    sprintf """Error %i on "self-init" (recv). %s.""" errn errm |> log.Warn
+                    Choice2Of2(errn, errm)
+                | Comm.Msg(k, m) -> 
+                    sprintf """Master notified of "%s" with response "%s".""" note m |> log.Trace
+                    Choice1Of2 (k, m)
+        let notified = Ctrl.retrytWith 60000.0 notyMaster
+        Nn.Shutdown(nsok, eid) |> ignore
+        Nn.Close(nsok) |> ignore
+        match notified with
+        | Choice2Of2 _ -> 
+            sprintf """Unable to notify master.""" |> log.Error
+        | Choice1Of2 (k, selfInitResponse) -> 
+
+        let envp = { msg = Comm.Msg(k, selfInitResponse)
+                     timeStamp = DateTimeOffset.Now }
+        let selfinit (msgs : Comm.Envelop list) = 
+            let _, note, nmsg = 
+                let emptyResult = String.Empty, String.Empty, []
+                match msgs with
+                | [] -> 
+                    log.Info("[{0}] Host receive (blocking).", lid)
+                    let tmsg = recv nsok
+                    let whenmsg k note =
+                        sprintf "[%d] Host \"%s\" note received." lid note |> log.Info
+                        k, note, []
+                    matchTMsg tmsg whenmsg (fun error -> 
+                        let errn, errm = error
+                        sprintf """[%d] Host error %i (recv). %s.""" lid errn errm |> log.Error
+                        emptyResult )
+                | head :: tail -> 
+                    let whenmsg k n =
+                        k, n, tail
+                    matchTMsg head.msg whenmsg (fun _ -> emptyResult)
+
+            let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+
+            let args = 
+                List.ofArray (if nparts.Length > 1 then nparts.[1..]
+                              else [||])
+
+            match Cli.parseArgs (Array.ofList args) with 
+            | Choice2Of2 ex -> 
+                sprintf "[%d] Host unable to parse arguments in note \"%s\"." lid note |> log.Warn
+                Choice2Of2 ex.Message
+            | Choice1Of2 parsedArgs -> 
+                let cmd = 
+                    let isValidProcessId =
+                        match parsedArgs.TryGetValue "processId" with
+                        | false, _ -> 
+                            sprintf "[%d] No processId in note \"%s\"." lid note |> log.Warn
+                            false
+                        | true, processId when processId <> lid.ToString() -> 
+                            sprintf "[%d] Invalid processId ignoring note \"%s\"." lid note |> log.Warn
+                            false
+                        | _ -> true
+                    let isValidLogicId = 
+                        match parsedArgs.TryGetValue "logicId" with
+                        | false, _ -> 
+                            sprintf "[%d] No logicId in note \"%s\"." lid note |> log.Warn
+                            false
+                        | _ -> 
+                            match Int32.TryParse (parsedArgs.["logicId"]) with
+                            | false, _ -> false
+                            | _ -> true
+                    let isValid = isValidProcessId && isValidLogicId
+                    match isValid with
+                    | false -> String.Empty
+                    | true -> 
+                        if nparts.Length > 0 then nparts.[0]
+                        else String.Empty
+                sprintf "[%d] Host processing command \"%s\"." lid cmd |> log.Info
+                match cmd with
+                | "sys:resp:self-init" -> 
+                    //"sys:resp:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s"
+                    Choice1Of2 parsedArgs
+                | unkown -> 
+                    Choice2Of2 (sprintf "Unknown message: \"%s\"." unkown)
+
+        match Ctrl.retrytWith 5000.0 (fun () -> selfinit [envp]) with 
+        | Choice2Of2 exm -> 
+            sprintf "[%d] Host unable to self-initialize. \"%s\"" lid exm |> log.Error
+            ()
+        | Choice1Of2 config -> 
+
+        let sok = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
+        assert (Nn.SetSockOpt(sok, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
+        assert (Nn.SetSockOpt(sok, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
+        //TODO:error handling for socket and connect
+        assert (sok >= 0)
+        let eid = Nn.Connect(sok, config.["controlAddress"])
+        assert (eid >= 0)
+        lid <- Int32.Parse config.["logicId"]
+        let publicKey = config.["publicKey"]
         use ctsrc = new CancellationTokenSource()
         ts
         |> List.rev
@@ -92,99 +224,98 @@ type ServiceHost() =
                let rtsrc = ReportStatusTokenSource()
                rtsrcs <- rtsrc :: rtsrcs
                let runAsync = t?RunAsync
-               let ckey = randomKey()
+               //let ckey = randomKey()
                let srv = Activator.CreateInstance(t, [||])
-               let task = runAsync.Invoke(srv, [| rtsrc.Token, ctsrc.Token |]) :?> Task
+               let task = runAsync.Invoke(srv, [| rtsrc.Token; ctsrc.Token |]) :?> Task
                services <- { ServiceData.None with task = task
-                                                   rtsrc = rtsrc }
+                                                   reportStatusTokenSource = rtsrc }
                            :: services)
-        //sprintf "[%i] Ormonit test in control loop with" lid |> log.Trace
-        let s = NN.Socket(Domain.SP, Protocol.RESPONDENT)
-        //TODO:error handling for socket and connect
-        assert (s >= 0)
-        let eid = NN.Connect(s, ca)
-        assert (eid >= 0)
-        let rec recvloop() = 
+        let rec recvloop (msgs : Comm.Envelop list) = 
             //let mutable buff : byte[] = null '\000'
-            //log.Info("[{0}] Ormonit test receive (blocking).", lid)
-            match recv s with
-            | Error(errn, errm) -> 
-                sprintf """[%s] Error %i (recv). %s.""" lid errn errm |> log.Error
-                recvloop()
-            | Msg(_, note) -> 
-                sprintf "[%s] Ormonit test \"%s\" note received." lid note |> log.Info
-                let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
-                
-                let args = 
-                    if nparts.Length > 1 then nparts.[1..]
-                    else [||]
-                
-                let cmd, parsed = 
-                    match Cli.parseArgs args with
-                    | Choice2Of2 exn -> 
-                        sprintf "[%s] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
-                        note, emptyDic
-                    | Choice1Of2 parsed -> 
-                        match parsed.TryGetValue "logicId" with
-                        | false, _ -> 
-                            sprintf "[%s] No logicId in note \"%s\"." lid note |> log.Warn
-                            note, parsed
-                        | true, logicId when logicId <> lid.ToString() -> 
-                            sprintf "[%s] Invalid logicId ignoring note \"%s\". " lid note |> log.Warn
-                            String.Empty, emptyDic
-                        | true, logicId -> 
-                            if nparts.Length > 0 then nparts.[0], parsed
-                            else String.Empty, emptyDic
-                
-                sprintf "[%s] Ormonit test command \"%s\"." lid cmd |> log.Info
+            let k, note, nmsg = 
+                let emptyResult = String.Empty, String.Empty, []
+                match msgs with
+                | [] -> 
+                    log.Info("[{0}] Host receive (blocking).", lid)
+                    let tmsg = recv sok
+                    let whenmsg k note =
+                        sprintf "[%d] Host \"%s\" note received." lid note |> log.Info
+                        k, note, []
+                    matchTMsg tmsg whenmsg (fun error -> 
+                        let errn, errm = error
+                        sprintf """[%d] Error %i (recv). %s.""" lid errn errm |> log.Error
+                        emptyResult )
+                | head :: tail -> 
+                    let whenmsg k n =
+                        k, n, tail
+                    matchTMsg head.msg whenmsg (fun _ -> emptyResult)
+
+            let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+            let args = 
+                List.ofArray (if nparts.Length > 1 then nparts.[1..]
+                              else [||])
+    
+            match Cli.parseArgs (Array.ofList args) with 
+            | Choice2Of2 _ -> 
+                sprintf "[%d] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
+                recvloop nmsg
+            | Choice1Of2 parsedArgs -> 
+                let command = 
+                    match parsedArgs.TryGetValue "logicId" with
+                    | false, _ -> 
+                        sprintf "[%d] No logicId in note \"%s\"." lid note |> log.Warn
+                        Some note
+                    | true, logicId when logicId <> lid.ToString() -> 
+                        sprintf "[%d] Invalid logicId ignoring note \"%s\"." lid note |> log.Warn
+                        None
+                    | true, _ -> 
+                        if nparts.Length > 0 then Some nparts.[0]
+                        else None
+                match command with
+                | None -> recvloop nmsg
+                | Some cmd ->
+
+                sprintf "[%d] Host processing command \"%s\"." lid cmd |> log.Info
                 match cmd with
                 | "sys:close" -> 
                     //log.Trace("""[{0}] Processing "close" notification. continue value {1}""", lid, flag)
                     ctsrc.Cancel()
                     log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-                    match Msg(ckey, "closing") |> send s with
+                    match Msg(ckey, "closing") |> send sok with
                     | Error(errn, errm) -> 
                         sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                        recvloop()
+                        recvloop nmsg
                     | Msg _ -> ()
-                //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
+                    //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
                 | "sys:report-status" -> 
                     log.Trace("""[{0}] Processing "report-status" command.""", lid)
                     let errors = 
                         services |> List.fold (fun notOk it -> 
-                                        let status = it.rtsrc.ReportStatus(Ctrl.actionTimeout)
+                                        let status = it.reportStatusTokenSource.ReportStatus(Ctrl.actionTimeout)
                                         match status with
                                         | "ok" -> notOk
                                         | nok -> { it with state = nok } :: notOk) List.empty
-                    
+
                     let summaryNote = 
                         match errors with
                         | [] -> "ok"
                         | _ -> "error"
-                    
+
                     log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                    match Msg(ckey, summaryNote) |> send s with
+                    match Msg(ckey, summaryNote) |> send sok with
                     | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
                     | Msg _ -> ()
                     log.Trace("""[{0}] Sent "report-status" aknowledgement.""", lid)
-                    recvloop()
-                | "sys:public-key" -> 
-                    lid <- parsed.["logicId"]
-                    publicKey <- parsed.["publicKey"]
-                    log.Trace("""[{0}] Reciving public-key: "{1}".""", lid, ckey)
-                    match Msg(lid.ToString(), "ok") |> send s with
-                    | Error(errn, errm) -> sprintf "Error %i sending public-key aknowledge. %s." errn errm |> log.Error
-                    | Msg _ -> log.Trace("[{0}] Sent public-key aknowledge.", lid)
-                    recvloop()
+                    recvloop nmsg
                 | "sys:client-key" -> 
                     log.Trace("""[{0}] Sending client-key: "{1}".""", lid, ckey)
                     let encrypted = encrypt publicKey ckey
                     let note = Convert.ToBase64String(encrypted)
-                    match Msg(lid.ToString(), note) |> send s with
+                    match Msg(lid.ToString(), note) |> send sok with
                     | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
                     | Msg _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, ckey)
-                    recvloop()
-                | _ -> recvloop()
-        recvloop()
-        assert (NN.Shutdown(s, eid) = 0)
-        assert (NN.Close(s) = 0)
+                    recvloop nmsg
+                | _ -> recvloop nmsg
+        recvloop []
+        assert (Nn.Shutdown(sok, eid) = 0)
+        assert (Nn.Close(sok) = 0)
