@@ -75,10 +75,10 @@ let private ctrlloop (config : Map<string, string>) =
         //let mutable buff : byte[] = null '\000'
         //log.Info("[{0}] Ormonit test receive (blocking).", lid)
         match recv s with
-        | Error(errn, errm) -> 
+        | Error (errn, errm) -> 
             sprintf """[%i] Error %i (recv). %s.""" lid errn errm |> log.Error
             recvloop()
-        | Msg(_, note) -> 
+        | Ok (_, note) -> 
             sprintf "[%i] Ormonit test \"%s\" note received." lid note |> log.Info
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             
@@ -88,10 +88,10 @@ let private ctrlloop (config : Map<string, string>) =
             
             let cmd = 
                 match Cli.parseArgs args with
-                | Choice2Of2 exn -> 
+                | Error exn -> 
                     sprintf "[%i] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                     note
-                | Choice1Of2 parsed -> 
+                | Ok parsed -> 
                     match parsed.TryGetValue "logicId" with
                     | false, _ -> 
                         sprintf "[%i] No logicId in note \"%s\"." lid note |> log.Warn
@@ -112,20 +112,20 @@ let private ctrlloop (config : Map<string, string>) =
                         continu)
                 //log.Trace("""[{0}] Processing "close" notification. continue value {1}""", lid, flag)
                 log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-                match Msg(config.["ckey"], "closing") |> send s with
-                | Error(errn, errm) -> 
+                match (config.["ckey"], "closing") |> send s with
+                | Error (errn, errm) -> 
                     sprintf """Error %i (send). %s.""" errn errm |> log.Error
                     recvloop()
-                | Msg _ -> ()
+                | _ -> ()
             //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
             | "sys:report-status" -> 
                 let uncertainty = random.NextDouble()
                 if uncertainty > 0.2 then 
                     //log.Trace("""[{0}] Processing "report-status" command.""", lid)
                     log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                    match Msg(config.["ckey"], "ok") |> send s with
+                    match (config.["ckey"], "ok") |> send s with
                     | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                    | Msg _ -> ()
+                    | _ -> ()
                 //log.Trace("""[{0}] Sent "report-status" aknowledgement.""", lid)
                 else log.Warn("""[{0}] Processing "report-status" failed (simulated).""", lid)
                 recvloop()
@@ -133,9 +133,9 @@ let private ctrlloop (config : Map<string, string>) =
                 log.Trace("""[{0}] Sending client-key: "{1}".""", lid, config.["ckey"])
                 let encrypted = encrypt config.["publicKey"] config.["ckey"]
                 let note = Convert.ToBase64String(encrypted)
-                match Msg(lid.ToString(), note) |> send s with
-                | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                | Msg _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])
+                match (lid.ToString(), note) |> send s with
+                | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
+                | Ok _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])
                 recvloop()
             | _ -> recvloop()
     recvloop()

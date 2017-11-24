@@ -82,7 +82,7 @@ let ctrlloop (config : IDictionary<string, string>) =
         | Error(errn, errm) -> 
             sprintf """Error %i (recv). %s.""" errn errm |> log.Error
             recvloop()
-        | Msg(_, note) -> 
+        | Ok(_, note) -> 
             sprintf "[%s] \"%s\" note received." lid note |> log.Info
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             
@@ -92,10 +92,10 @@ let ctrlloop (config : IDictionary<string, string>) =
             
             let cmd = 
                 match Cli.parseArgs args with
-                | Choice2Of2 exn -> 
+                | Error exn -> 
                     sprintf "[%s] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                     note
-                | Choice1Of2 parsed -> 
+                | Ok parsed -> 
                     match parsed.TryGetValue "logicId" with
                     | false, _ -> 
                         sprintf "[%s] No logicId in note \"%s\"." lid note |> log.Warn
@@ -113,20 +113,20 @@ let ctrlloop (config : IDictionary<string, string>) =
                 log.Trace("""[{0}] Sending client-key: "{1}".""", lid, config.["ckey"])
                 let encrypted = encrypt config.["publicKey"] config.["ckey"]
                 let note = Convert.ToBase64String(encrypted)
-                match Msg(lid.ToString(), note) |> send s with
-                | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                | Msg _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])
+                match (lid.ToString(), note) |> send s with
+                | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
+                | Ok _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])
                 recvloop()
             | "sys:report-status" -> 
                 log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                match Msg(config.["ckey"], "ok") |> send s with
-                | Error(errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
+                match (config.["ckey"], "ok") |> send s with
+                | Error (errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
                 | _ -> ()
                 recvloop()
             | "sys:close" -> 
                 log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-                match Msg(lid, "closing") |> send s with
-                | Error(errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
+                match (lid, "closing") |> send s with
+                | Error (errn, errm) -> sprintf "Error %i (send). %s." errn errm |> log.Error
                 | _ -> ()
             | _ -> recvloop()
     recvloop()

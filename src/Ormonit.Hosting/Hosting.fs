@@ -1,7 +1,5 @@
 ﻿namespace Ormonit.Hosting
 
-open Cilnn
-open Comm
 open System
 open NLog
 open NLog.Layouts
@@ -96,57 +94,57 @@ type ServiceHost() =
             t.GetMethod(mname, [| typeof<ReportStatusToken>; typeof<CancellationToken> |])
         let matchTMsg tmsg onmsgf onerrorf = 
             match tmsg with
-                | Comm.Error err -> onerrorf err
-                | Comm.Msg(ckey, note) -> onmsgf ckey note
+                | Error err -> onerrorf err
+                | Ok (ckey, note) -> onmsgf ckey note
 
         //sprintf "[%i] Ormonit test in control loop with" lid |> log.Trace
-        let nsok = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
+        let nsok = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.SURVEYOR)
         //TODO:error handling for socket and bind
         assert (nsok >= 0)
-        assert (Nn.SetSockOpt(nsok, SocketOption.SURVEYOR_DEADLINE, Ctrl.superviseInterval * 10) = 0)
-        assert (Nn.SetSockOpt(nsok, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 10) = 0)
-        assert (Nn.SetSockOpt(nsok, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 10) = 0)
-        let eid = Nn.Connect(nsok, Ctrl.notifyAddress)
+        assert (Cilnn.Nn.SetSockOpt(nsok, Cilnn.SocketOption.SURVEYOR_DEADLINE, Ctrl.superviseInterval * 10) = 0)
+        assert (Cilnn.Nn.SetSockOpt(nsok, Cilnn.SocketOption.SNDTIMEO, Ctrl.superviseInterval * 10) = 0)
+        assert (Cilnn.Nn.SetSockOpt(nsok, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 10) = 0)
+        let eid = Cilnn.Nn.Connect(nsok, Ctrl.notifyAddress)
         assert (eid >= 0)
         let cprocess = Process.GetCurrentProcess()
         let lid = cprocess.Id
         let note = sprintf "sys:self-init --process-id %d --process-start-time %s" cprocess.Id (cprocess.StartTime.ToString("o"))
-        let notyMaster() = 
+        let notyMaster() : Result<Comm.TMsg, Comm.Error> = 
             sprintf "Sending \"%s\" note." note |> log.Trace
-            match Comm.sendWith nsok SendRecvFlags.NONE (Comm.Msg(String.Empty, note)) with
-            | Comm.Error(errn, errm) -> 
+            match Comm.sendWith nsok Cilnn.SendRecvFlags.NONE (String.Empty, note) with
+            | Error (errn, errm) -> 
                 match errn with
                 | 156384766 -> 
                     sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm |> log.Warn
                 | _ -> 
                     sprintf """Error %i on "self-init" (send). %s.""" errn errm |> log.Warn
-                Choice2Of2(errn, errm)
+                Error (errn, errm)
             | r -> 
                 sprintf "Sent \"%s\" note." note |> log.Trace
                 match Comm.recv nsok with
-                | Comm.Error(errn, errm)-> 
+                | Error (errn, errm)-> 
                     sprintf """Error %i on "self-init" (recv). %s.""" errn errm |> log.Warn
-                    Choice2Of2(errn, errm)
-                | Comm.Msg(k, m) -> 
+                    Error (errn, errm)
+                | Ok (k, m) -> 
                     sprintf """Master notified of "%s" with response "%s".""" note m |> log.Trace
-                    Choice1Of2 (k, m)
-        let notified = Ctrl.retrytWith 60000.0 notyMaster
-        Nn.Shutdown(nsok, eid) |> ignore
-        Nn.Close(nsok) |> ignore
+                    Ok (k, m)
+        let notified = Ctrl.retrytWith 60000 notyMaster
+        Cilnn.Nn.Shutdown(nsok, eid) |> ignore
+        Cilnn.Nn.Close(nsok) |> ignore
         match notified with
-        | Choice2Of2 _ -> 
+        | Error _ -> 
             sprintf """Unable to notify master.""" |> log.Error
-        | Choice1Of2 (k, selfInitResponse) -> 
+        | Ok (k, selfInitResponse) -> 
 
-        let envp = { msg = Comm.Msg(k, selfInitResponse)
-                     timeStamp = DateTimeOffset.Now }
+        let envp = { Comm.Envelop.msg = k, selfInitResponse
+                     Comm.Envelop.timeStamp = DateTimeOffset.Now }
         let selfinit (msgs : Comm.Envelop list) = 
             let _, note, nmsg = 
                 let emptyResult = String.Empty, String.Empty, []
                 match msgs with
                 | [] -> 
                     log.Info("[{0}] Host receive (blocking).", lid)
-                    let tmsg = recv nsok
+                    let tmsg = Comm.recv nsok
                     let whenmsg k note =
                         sprintf "[%d] Host \"%s\" note received." lid note |> log.Info
                         k, note, []
@@ -157,7 +155,7 @@ type ServiceHost() =
                 | head :: tail -> 
                     let whenmsg k n =
                         k, n, tail
-                    matchTMsg head.msg whenmsg (fun _ -> emptyResult)
+                    matchTMsg (Ok head.msg) whenmsg (fun _ -> emptyResult)
 
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
 
@@ -166,10 +164,10 @@ type ServiceHost() =
                               else [||])
 
             match Cli.parseArgs (Array.ofList args) with 
-            | Choice2Of2 ex -> 
+            | Error ex -> 
                 sprintf "[%d] Host unable to parse arguments in note \"%s\"." lid note |> log.Warn
-                Choice2Of2 ex.Message
-            | Choice1Of2 parsedArgs -> 
+                Error ex.Message
+            | Ok parsedArgs -> 
                 let cmd = 
                     let isValidProcessId =
                         match parsedArgs.TryGetValue "processId" with
@@ -199,22 +197,22 @@ type ServiceHost() =
                 match cmd with
                 | "sys:resp:self-init" -> 
                     //"sys:resp:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s"
-                    Choice1Of2 parsedArgs
+                    Ok parsedArgs
                 | unkown -> 
-                    Choice2Of2 (sprintf "Unknown message: \"%s\"." unkown)
+                    Error (sprintf "Unknown message: \"%s\"." unkown)
 
-        match Ctrl.retrytWith 5000.0 (fun () -> selfinit [envp]) with 
-        | Choice2Of2 exm -> 
+        match Ctrl.retrytWith 5000 (fun () -> selfinit [envp]) with 
+        | Error exm -> 
             sprintf "[%d] Host unable to self-initialize. \"%s\"" lid exm |> log.Error
             ()
-        | Choice1Of2 config -> 
+        | Ok config -> 
 
-        let sok = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
-        assert (Nn.SetSockOpt(sok, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
-        assert (Nn.SetSockOpt(sok, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
+        let sok = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.RESPONDENT)
+        assert (Cilnn.Nn.SetSockOpt(sok, Cilnn.SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
+        assert (Cilnn.Nn.SetSockOpt(sok, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
         //TODO:error handling for socket and connect
         assert (sok >= 0)
-        let eid = Nn.Connect(sok, config.["controlAddress"])
+        let eid = Cilnn.Nn.Connect(sok, config.["controlAddress"])
         assert (eid >= 0)
         let lid = Int32.Parse config.["logicId"]
         let publicKey = config.["publicKey"]
@@ -235,7 +233,7 @@ type ServiceHost() =
                 match msgs with
                 | [] -> 
                     log.Info("[{0}] Host receive (blocking).", lid)
-                    let tmsg = recv sok
+                    let tmsg = Comm.recv sok
                     let whenmsg k note =
                         sprintf "[%d] Host \"%s\" note received." lid note |> log.Info
                         k, note, []
@@ -246,7 +244,7 @@ type ServiceHost() =
                 | head :: tail -> 
                     let whenmsg k n =
                         k, n, tail
-                    matchTMsg head.msg whenmsg (fun _ -> emptyResult)
+                    matchTMsg (Ok head.msg) whenmsg (fun _ -> emptyResult)
 
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             let args = 
@@ -254,10 +252,10 @@ type ServiceHost() =
                               else [||])
     
             match Cli.parseArgs (Array.ofList args) with 
-            | Choice2Of2 _ -> 
+            | Error _ -> 
                 sprintf "[%d] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                 recvloop nmsg
-            | Choice1Of2 parsedArgs -> 
+            | Ok parsedArgs -> 
                 let command = 
                     match parsedArgs.TryGetValue "logicId" with
                     | false, _ -> 
@@ -279,17 +277,17 @@ type ServiceHost() =
                     //log.Trace("""[{0}] Processing "close" notification. continue value {1}""", lid, flag)
                     ctsrc.Cancel()
                     log.Trace("""[{0}] Sending "close" aknowledgement.""", lid)
-                    match Msg(ckey, "closing") |> send sok with
-                    | Error(errn, errm) -> 
+                    match (ckey, "closing") |> Comm.send sok with
+                    | Error (errn, errm) -> 
                         sprintf """Error %i (send). %s.""" errn errm |> log.Error
                         recvloop nmsg
-                    | Msg _ -> ()
+                    | Ok _ -> ()
                     //log.Trace("""[{0}] Sent "close" aknowledgement.""", lid)
                 | "sys:report-status" -> 
                     log.Trace("""[{0}] Processing "report-status" command.""", lid)
                     let errors = 
                         services |> Seq.fold (fun notOk it -> 
-                                        let status = it.reportStatusTokenSource.ReportStatus(Ctrl.actionTimeout)
+                                        let status = it.reportStatusTokenSource.ReportStatus(float (Ctrl.actionTimeout))
                                         match status with
                                         | "ok" -> notOk
                                         | nok -> { it with state = nok } :: notOk ) List.empty
@@ -300,20 +298,20 @@ type ServiceHost() =
                         | _ -> "error"
 
                     log.Trace("""[{0}] Sending "report-status" aknowledgement.""", lid)
-                    match Msg(ckey, summaryNote) |> send sok with
-                    | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                    | Msg _ -> ()
+                    match (ckey, summaryNote) |> Comm.send sok with
+                    | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
+                    | Ok _ -> ()
                     log.Trace("""[{0}] Sent "report-status" aknowledgement.""", lid)
                     recvloop nmsg
                 | "sys:client-key" -> 
                     log.Trace("""[{0}] Sending client-key: "{1}".""", lid, ckey)
                     let encrypted = encrypt publicKey ckey
                     let note = Convert.ToBase64String(encrypted)
-                    match Msg(lid.ToString(), note) |> send sok with
-                    | Error(errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
-                    | Msg _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, ckey)
+                    match (lid.ToString(), note) |> Comm.send sok with
+                    | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
+                    | Ok _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, ckey)
                     recvloop nmsg
                 | _ -> recvloop nmsg
         recvloop []
-        assert (Nn.Shutdown(sok, eid) = 0)
-        assert (Nn.Close(sok) = 0)
+        assert (Cilnn.Nn.Shutdown(sok, eid) = 0)
+        assert (Cilnn.Nn.Close(sok) = 0)

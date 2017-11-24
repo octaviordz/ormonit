@@ -73,7 +73,7 @@ let parseArgs args =
                         
                         let tt = tokenType (narg)
                         if tt = "string" then result.Add(option.Destination, narg))
-        Choice1Of2(result)
+        Ok result
     with ex -> 
         printf "%A" ex
-        Choice2Of2(ex)
+        Error ex

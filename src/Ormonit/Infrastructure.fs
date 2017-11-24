@@ -4,6 +4,7 @@ open System
 open System.Reflection
 open System.Security.Cryptography
 open System.Text
+
 #if DNXCORE50
 
 type AssemblyLoader(folderPath) = 
@@ -86,6 +87,7 @@ module Logging =
         new(msg : string) = Fatall(null, asFunc (msg), [||])
     
     let log (logFormat : LogFormat<'T>) : unit = logf logFormat.LogLevel logFormat.MsgFunc logFormat.Exception [||]
+
 module Security =
     let randomKey() = 
         use rngCryptoServiceProvider = new RNGCryptoServiceProvider()

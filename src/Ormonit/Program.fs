@@ -1,11 +1,12 @@
 ﻿open Ctrl
 open System
-open System.IO
 open System.Text
 open System.Threading
-open Cilnn
 open Ormonit.Logging
 open Ormonit.Security
+
+let okExit = 0
+let errorExit = 1
 
 let printUsage() = printfn @"
 Ormonit [options]
@@ -52,8 +53,6 @@ Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
     ())
 
 let parseAndExecute argv : int = 
-    let ok = 0
-    let unknown = Int32.MaxValue
     let config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
     Cli.addArg { Cli.arg with Option = "-cmd"
                               LongOption = "--command"
@@ -78,10 +77,11 @@ let parseAndExecute argv : int =
                               LongOption = "--process-start-time"
                               Destination = "processStartTime" }
     match Cli.parseArgs argv with
-    | Choice2Of2(exn) -> 
+    | Error exn -> 
+        log (Errorl(exn, String.Empty))
         printUsage()
-        ok
-    | Choice1Of2(parsedArgs) -> 
+        okExit
+    | Ok parsedArgs -> 
         let validArgs = 
             (parsedArgs.Count = 1 && parsedArgs.ContainsKey "command") 
             || (parsedArgs.Count = 1 && parsedArgs.ContainsKey "notify") 
@@ -90,7 +90,7 @@ let parseAndExecute argv : int =
                 && parsedArgs.ContainsKey "publicKey" && parsedArgs.ContainsKey "controlAddress")
         if not validArgs then 
             printUsage()
-            ok
+            okExit
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "start" then 
             let mutable started = 0
             let mutable running = 0
@@ -123,107 +123,111 @@ let parseAndExecute argv : int =
             p.BeginOutputReadLine()
             while Volatile.Read(&started) = 0 && Volatile.Read(&running) = 0 && Volatile.Read(&error) = 0 do
                 System.Threading.Thread.CurrentThread.Join 1 |> ignore
-            if error = 1 then unknown
-            elif running = 1 then unknown
-            else ok
+            if error = 1 then errorExit
+            elif running = 1 then errorExit
+            else okExit
         elif parsedArgs.ContainsKey "command" && parsedArgs.["command"] = "stop" then 
             let note = "sys:close"
-            let nsocket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
+            let nsocket = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.SURVEYOR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)
-            assert (Nn.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
-            assert (Nn.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
-            let eid = Nn.Connect(nsocket, notifyAddress)
+            assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
+            assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
+            let eid = Cilnn.Nn.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
             log (Tracel (sprintf "[Stop Process] Notify \"%s\"." note))
-            let send() = Comm.send nsocket (Comm.Msg("", note))
+            let send() = Comm.send nsocket ("", note)
             
-            let errn, errm = 
+            let result = 
                 match send() with
-                | Comm.Msg _ -> (ok, String.Empty)
-                | Comm.Error(errn, errm) -> 
+                | Ok v -> Ok v
+                | Error (errn, errm) -> 
                     //11 Resource unavailable, try again
-                    if errn <> 11 then errn, errm
+                    if errn <> 11 then Error (errn, errm)
                     else 
                         //we try again
                         match send() with
-                        | Comm.Msg _ -> (ok, String.Empty)
-                        | Comm.Error(errn, errm) -> errn, errm
-            if errn <> ok then 
+                        | Ok v -> Ok v
+                        | Error (errn, errm) -> Error (errn, errm)
+            match result with 
+            | Error (errn, errm) -> 
                 log (Warnl (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
+            | _ -> ()
             let recv() = Comm.recv nsocket
             let mutable masterpid = -1
             
             let errn, errm = 
                 match recv() with
-                | Comm.Msg(_, npid) -> 
+                | Ok (_, npid) -> 
                     masterpid <- Int32.Parse(npid)
-                    (ok, String.Empty)
-                | Comm.Error(errn, errm) -> //we try again
+                    (okExit, String.Empty)
+                | Error (errn, errm) -> //we try again
                     match recv() with
-                    | Comm.Msg(_, npid) -> 
+                    | Ok (_, npid) -> 
                         masterpid <- Int32.Parse(npid)
-                        (ok, String.Empty)
-                    | Comm.Error(errn, errm) -> (errn, errm)
-            if errn = ok then 
+                        (okExit, String.Empty)
+                    | Error (errn, errm) -> (errn, errm)
+            if errn = okExit then 
                 Infol (sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
                 |> log
             else 
                 Warnl (sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
                 |> log
-            Nn.Shutdown(nsocket, eid) |> ignore
-            Nn.Close(nsocket) |> ignore
-            if errn <> ok then unknown
+            Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
+            Cilnn.Nn.Close(nsocket) |> ignore
+            if errn <> okExit then errorExit
             else 
                 //TODO:IMPORTANT: check process identity
                 match tryGetProcess masterpid with
-                | false, _ -> ok //assume it's closed
+                | false, _ -> okExit //assume it's closed
                 | true, p -> 
                     try 
                         p.WaitForExit()
-                        ok
+                        okExit
                     with ex -> 
                         Errorl (sprintf "[Stop Process] Error waiting for master exit. Master pid: %i." masterpid) 
                         |> log
-                        unknown
+                        errorExit
         elif parsedArgs.ContainsKey "notify" then 
             let note = parsedArgs.["notify"]
-            let nsocket = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
+            let nsocket = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.SURVEYOR)
             let buff : byte array = Array.zeroCreate maxMessageSize
             //TODO:error handling for socket and bind
             assert (nsocket >= 0)
-            assert (Nn.SetSockOpt(nsocket, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
-            assert (Nn.SetSockOpt(nsocket, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
-            let eid = Nn.Connect(nsocket, notifyAddress)
+            assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
+            assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
+            let eid = Cilnn.Nn.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
             log (Tracel (sprintf "Notify \"%s\" (notify process)." note))
             let bytes = Encoding.UTF8.GetBytes(note)
-            let send() = Comm.send nsocket (Comm.Msg("", note))
+            let send() = Comm.send nsocket ("", note)
             match send() with
             //11 Resource unavailable, try again
-            | Comm.Error(11, errm) -> //we try again
+            | Error (11, errm) -> //we try again
                 match send() with
-                | Comm.Msg _ -> ()
-                | Comm.Error(errn, errm) -> 
+                | Ok _ -> ()
+                | Error (errn, errm) -> 
                     log (Warnl (sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm))
             | _ -> ()
             let recv() = Comm.recv nsocket
             let mutable masterpid = -1
             match recv() with
-            | Comm.Msg(_, npid) -> masterpid <- Int32.Parse(npid)
-            | Comm.Error(errn, errm) -> //we try again
+            | Ok (_, npid) -> masterpid <- Int32.Parse(npid)
+            | Error (errn, errm) -> //we try again
                 log (Tracel (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
                 match recv() with
-                | Comm.Msg(_, npid) -> masterpid <- Int32.Parse(npid)
-                | Comm.Error(errn, errm) -> 
+                | Ok (_, npid) -> masterpid <- Int32.Parse(npid)
+                | Error (errn, errm) -> 
                     log (Warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             if masterpid <> -1 then 
                 log (Infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
-            Nn.Shutdown(nsocket, eid) |> ignore
-            Nn.Close(nsocket) |> ignore
-            ok
+            Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
+            Cilnn.Nn.Close(nsocket) |> ignore
+            okExit
         elif parsedArgs.ContainsKey "openMaster" then 
+            //let ctrlKey = Ctrl.makeMaster()
+            //Ctrl.start ctrlKey
             let pubkey, prikey = createAsymetricKeys()
             
             let execc = 
@@ -244,8 +248,8 @@ let parseAndExecute argv : int =
                 config.Add("logicId", parsedArgs.["logicId"]).Add("publicKey", parsedArgs.["publicKey"])
                       .Add("assemblyPath", runArg)
             executeService srvconfig
-            ok
-        else unknown
+            okExit
+        else errorExit
 
 [<EntryPoint>]
 let main argv = 
@@ -254,7 +258,7 @@ let main argv =
         match List.ofArray argv with
         | [] -> 
             printUsage()
-            0
+            okExit
         | "start" :: tail -> Array.ofList ([ "-cmd"; "start" ] @ tail) |> parseAndExecute
         | "stop" :: tail -> Array.ofList ([ "-cmd"; "stop" ] @ tail) |> parseAndExecute
         | argl -> Array.ofList argl |> parseAndExecute
@@ -267,4 +271,4 @@ let main argv =
                 (sprintf "Command failed.\nErrorType:%s\nError:\n%s\nInnerException:\n%s" (ex.GetType().Name) ex.Message 
                      ex.InnerException.Message) |> log
             Errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
-        1
+        errorExit
