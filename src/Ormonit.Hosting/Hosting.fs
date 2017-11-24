@@ -54,7 +54,7 @@ module internal Host =
 
 [<Struct>]
 type ReportStatusToken = 
-    val mutable src : ReportStatusTokenSource
+    val mutable private src : ReportStatusTokenSource
     new(source : ReportStatusTokenSource) = { src = source }
     member s.Register(callback : Func<string>) : unit = s.src.Register(callback)
     member s.Report(status : string) : unit = s.src.PostStatus(status)
@@ -67,9 +67,9 @@ and ReportStatusTokenSource() =
         let mutable status = String.Empty
         actions.ForEach(fun it -> status <- it.Invoke())
         status
-    
-    member s.PostStatus(status : string) : unit = ()
-    member s.Register(callback : Func<string>) : unit = actions.Add(callback)
+
+    member __.PostStatus(status : string) : unit = ()
+    member __.Register(callback : Func<string>) : unit = actions.Add(callback)
     member s.Token : ReportStatusToken = ReportStatusToken(s)
 
 type ServiceData = 
@@ -82,19 +82,18 @@ type ServiceData =
           reportStatusTokenSource = Unchecked.defaultof<ReportStatusTokenSource> }
 
 type ServiceHost() = 
-    let mutable ts = List.empty
-    let mutable services = List.empty
+    let ts = List<System.Type>()
+    let services = List<ServiceData>()
     let log = Host.log
     let ckey = randomKey()
     
-    member s.AddService<'T>() : unit = 
-        ts <- typeof<'T> :: ts
+    member __.AddService<'T>() : unit = 
+        ts.Add(typeof<'T>)
         ()
     
     member s.Run() : unit = 
-        let mutable rtsrcs = List.empty<ReportStatusTokenSource>
-        let emptyDic = Dictionary<string, string>()
-        let (?) (t : Type) (mname : string) = t.GetMethod(mname, [| typeof<ReportStatusToken>; typeof<CancellationToken> |])
+        let (?) (t : Type) (mname : string) = 
+            t.GetMethod(mname, [| typeof<ReportStatusToken>; typeof<CancellationToken> |])
         let matchTMsg tmsg onmsgf onerrorf = 
             match tmsg with
                 | Comm.Error err -> onerrorf err
@@ -104,15 +103,16 @@ type ServiceHost() =
         let nsok = Nn.Socket(Domain.SP, Protocol.SURVEYOR)
         //TODO:error handling for socket and bind
         assert (nsok >= 0)
-        assert (Nn.SetSockOpt(nsok, SocketOption.SURVEYOR_DEADLINE, Ctrl.superviseInterval / 2) = 0)
+        assert (Nn.SetSockOpt(nsok, SocketOption.SURVEYOR_DEADLINE, Ctrl.superviseInterval * 10) = 0)
         assert (Nn.SetSockOpt(nsok, SocketOption.SNDTIMEO, Ctrl.superviseInterval * 10) = 0)
         assert (Nn.SetSockOpt(nsok, SocketOption.RCVTIMEO, Ctrl.superviseInterval * 10) = 0)
         let eid = Nn.Connect(nsok, Ctrl.notifyAddress)
         assert (eid >= 0)
         let cprocess = Process.GetCurrentProcess()
-        let mutable lid = cprocess.Id
+        let lid = cprocess.Id
         let note = sprintf "sys:self-init --process-id %d --process-start-time %s" cprocess.Id (cprocess.StartTime.ToString("o"))
         let notyMaster() = 
+            sprintf "Sending \"%s\" note." note |> log.Trace
             match Comm.sendWith nsok SendRecvFlags.NONE (Comm.Msg(String.Empty, note)) with
             | Comm.Error(errn, errm) -> 
                 match errn with
@@ -122,6 +122,7 @@ type ServiceHost() =
                     sprintf """Error %i on "self-init" (send). %s.""" errn errm |> log.Warn
                 Choice2Of2(errn, errm)
             | r -> 
+                sprintf "Sent \"%s\" note." note |> log.Trace
                 match Comm.recv nsok with
                 | Comm.Error(errn, errm)-> 
                     sprintf """Error %i on "self-init" (recv). %s.""" errn errm |> log.Warn
@@ -215,21 +216,18 @@ type ServiceHost() =
         assert (sok >= 0)
         let eid = Nn.Connect(sok, config.["controlAddress"])
         assert (eid >= 0)
-        lid <- Int32.Parse config.["logicId"]
+        let lid = Int32.Parse config.["logicId"]
         let publicKey = config.["publicKey"]
         use ctsrc = new CancellationTokenSource()
         ts
-        |> List.rev
-        |> List.iter (fun t -> 
+        |> Seq.iter (fun t -> 
                let rtsrc = ReportStatusTokenSource()
-               rtsrcs <- rtsrc :: rtsrcs
                let runAsync = t?RunAsync
                //let ckey = randomKey()
                let srv = Activator.CreateInstance(t, [||])
                let task = runAsync.Invoke(srv, [| rtsrc.Token; ctsrc.Token |]) :?> Task
-               services <- { ServiceData.None with task = task
-                                                   reportStatusTokenSource = rtsrc }
-                           :: services)
+               services.Add({ ServiceData.None with task = task
+                                                    reportStatusTokenSource = rtsrc }) )
         let rec recvloop (msgs : Comm.Envelop list) = 
             //let mutable buff : byte[] = null '\000'
             let k, note, nmsg = 
@@ -290,11 +288,11 @@ type ServiceHost() =
                 | "sys:report-status" -> 
                     log.Trace("""[{0}] Processing "report-status" command.""", lid)
                     let errors = 
-                        services |> List.fold (fun notOk it -> 
+                        services |> Seq.fold (fun notOk it -> 
                                         let status = it.reportStatusTokenSource.ReportStatus(Ctrl.actionTimeout)
                                         match status with
                                         | "ok" -> notOk
-                                        | nok -> { it with state = nok } :: notOk) List.empty
+                                        | nok -> { it with state = nok } :: notOk ) List.empty
 
                     let summaryNote = 
                         match errors with

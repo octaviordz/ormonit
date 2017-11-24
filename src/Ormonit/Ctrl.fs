@@ -379,7 +379,14 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (execc : Execc) : unit
             match stale with
             | None -> nmsgs <- envp :: nmsgs
             | Some e ->
-                log (Errorl(sprintf """Stale message %A.""" e))
+                match Int32.TryParse parsedArgs.["logicId"] with 
+                | false, _ -> 
+                    Errorl(sprintf """Stale message %A. Invalid logicId "%s".""" e (parsedArgs.["logicId"]))
+                    |> log
+                | true, lid ->  
+                    execc.services.[lid] <- ServiceData.Default
+                    log (Errorl(sprintf "Stale message %A." e))
+
         | Comm.Msg(logicId, ekey) -> 
             let lid = Int32.Parse(logicId)
             let dr, clientKey = tryDecrypt execc.privateKey (Convert.FromBase64String(ekey))

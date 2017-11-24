@@ -9,7 +9,7 @@ namespace Archivar
 {
     class ArchiveService
     {
-        static ILog log = LogProvider.GetLogger("Archivar");
+        static ILog log = LogProvider.GetLogger($"{nameof(Archivar)}.{nameof(ArchiveService)}");
         static string appData = Environment.GetFolderPath(
                 Environment.SpecialFolder.ApplicationData);
 
@@ -48,14 +48,6 @@ namespace Archivar
                     watcher.Changed -= WatcherOnChanged;
                     watcher.Created -= WatcherOnChanged;
                 }
-            });
-            return result;
-        }
-
-        public Task RunAsync()
-        {
-            var result = Task.Run(() =>
-            {
             });
             return result;
         }
