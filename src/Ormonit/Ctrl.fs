@@ -81,18 +81,19 @@ type Execc =
 type Ctlkey = 
     { key : string }
 
-let rec retryt f = retrytWith actionTimeout f
+let rec retryt f = 
+    retrytWith actionTimeout f
 
-and retrytWith t f = 
-    let timeoutMark = Environment.TickCount + t
-    tryagint timeoutMark f
+and retrytWith timeo f = 
+    let timestamp = Environment.TickCount
+    tryagint timestamp timeo f
 
-and tryagint tm f = 
+and tryagint timestamp timeo f = 
     match f() with
     | Ok r -> Ok r
     | Error err -> 
-        if Environment.TickCount > tm then Result.Error err
-        else tryagint tm f
+        if (Environment.TickCount - timestamp) >= timeo then Error err
+        else tryagint timestamp timeo f
 
 let randomKey() = 
     use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
