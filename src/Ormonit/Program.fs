@@ -4,6 +4,7 @@ open System.Text
 open System.Threading
 open Ormonit.Logging
 open Ormonit.Security
+open System.Collections.Concurrent
 
 let okExit = 0
 let errorExit = 1
@@ -53,7 +54,10 @@ Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
     ())
 
 let parseAndExecute argv : int = 
-    let config = Map.empty.Add("controlAddress", "ipc://ormonit/control.ipc")
+    let config = 
+        Map.empty.
+            Add("controlAddress", Ctrl.controlAddress).
+            Add("notifyAddress", Ctrl.notifyAddress)
     Cli.addArg { Cli.arg with Option = "-cmd"
                               LongOption = "--command"
                               Destination = "command" }
@@ -169,10 +173,10 @@ let parseAndExecute argv : int =
                         (okExit, String.Empty)
                     | Error (errn, errm) -> (errn, errm)
             if errn = okExit then 
-                Infol (sprintf "[Stop Process] Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
+                Infol (sprintf "[Stop Process] Acknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
                 |> log
             else 
-                Warnl (sprintf "[Stop Process] No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
+                Warnl (sprintf "[Stop Process] No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
                 |> log
             Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
             Cilnn.Nn.Close(nsocket) |> ignore
@@ -215,13 +219,13 @@ let parseAndExecute argv : int =
             match recv() with
             | Ok (_, npid) -> masterpid <- Int32.Parse(npid)
             | Error (errn, errm) -> //we try again
-                log (Tracel (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+                log (Tracel (sprintf "No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
                 match recv() with
                 | Ok (_, npid) -> masterpid <- Int32.Parse(npid)
                 | Error (errn, errm) -> 
-                    log (Warnl (sprintf "No aknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+                    log (Warnl (sprintf "No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
             if masterpid <> -1 then 
-                log (Infol (sprintf "Aknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
+                log (Infol (sprintf "Acknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
             Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
             Cilnn.Nn.Close(nsocket) |> ignore
             okExit
@@ -229,18 +233,17 @@ let parseAndExecute argv : int =
             //let ctrlKey = Ctrl.makeMaster()
             //Ctrl.start ctrlKey
             let pubkey, prikey = createAsymetricKeys()
-            
-            let execc = 
-                { masterKey = ""
+            let states = ConcurrentStack<(string * DateTimeOffset)>()
+            let context = 
+                { Context.masterKey = ""
                   publicKey = pubkey
                   privateKey = prikey
                   execcType = ExeccType.ConsoleApplication
                   config = config
                   lids = Map.empty
-                  services = Array.create maxOpenServices ServiceData.Default
-                  thread = Thread.CurrentThread }
-            
-            let opr = openMaster (execc)
+                  services = Array.create maxOpenServices ServiceData.Default }
+            let opr = openMaster states context
+            Cilnn.Nn.Term()
             opr
         elif parsedArgs.ContainsKey "openService" then 
             let runArg = parsedArgs.["openService"]

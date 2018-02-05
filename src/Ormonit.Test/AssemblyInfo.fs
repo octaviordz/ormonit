@@ -1,4 +1,4 @@
-﻿namespace Ormonit.AssemblyInfo
+﻿namespace Ormonit.Test.AssemblyInfo
 
 open System.Reflection
 open System.Runtime.CompilerServices
@@ -7,15 +7,14 @@ open System.Runtime.InteropServices
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[<assembly: AssemblyTitle("Ormonit")>]
+[<assembly: AssemblyTitle("Ormonit.Test")>]
 [<assembly: AssemblyDescription("")>]
 [<assembly: AssemblyConfiguration("")>]
 [<assembly: AssemblyCompany("")>]
-[<assembly: AssemblyProduct("Ormonit")>]
-[<assembly: AssemblyCopyright("Copyright ©  2017")>]
+[<assembly: AssemblyProduct("Ormonit.Test")>]
+[<assembly: AssemblyCopyright("Copyright ©  2018")>]
 [<assembly: AssemblyTrademark("")>]
 [<assembly: AssemblyCulture("")>]
-[<assembly: InternalsVisibleToAttribute("Ormonit.Test")>]
 
 // Setting ComVisible to false makes the types in this assembly not visible 
 // to COM components.  If you need to access a type in this assembly from 
@@ -23,7 +22,7 @@ open System.Runtime.InteropServices
 [<assembly: ComVisible(false)>]
 
 // The following GUID is for the ID of the typelib if this project is exposed to COM
-[<assembly: Guid("175e4fce-e478-4f2d-9021-e6ef2c07d629")>]
+[<assembly: Guid("e19a653b-78d3-4955-bf0e-62dc7d07eea1")>]
 
 // Version information for an assembly consists of the following four values:
 // 

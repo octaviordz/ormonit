@@ -1,22 +1,20 @@
-﻿open System
-open System.IO
-open System.Diagnostics
-open Topshelf
-open Time
-open NLog
-open NLog.Layouts
-open Ormonit.Logging
+﻿open Ormonit
 
-let ormonitFileName = Path.Combine(Environment.CurrentDirectory, "Ormonit")
+// Learn more about F# at http://fsharp.org
+// See the 'F# Tutorial' project for more help.
 
-let nlog = NLog.LogManager.GetLogger "Ormonit.WinService"
+
+let nlog = NLog.LogManager.GetLogger "Ormonit"
 let olog = NLog.LogManager.GetLogger "_Ormonit.Output_"
 let logConfig = NLog.Config.LoggingConfiguration()
 let consoleTarget = new NLog.Targets.ColoredConsoleTarget()
+
 logConfig.AddTarget("console", consoleTarget)
+
 let fileTarget = new NLog.Targets.FileTarget()
+
 logConfig.AddTarget("file", fileTarget)
-consoleTarget.Layout <-NLog.Layouts.Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
+consoleTarget.Layout <- NLog.Layouts.Layout.FromString @"${date:format=HH\:mm\:ss}|${logger}|${message}"
 fileTarget.FileName <- NLog.Layouts.Layout.FromString @"${basedir}\logs\ormonit.log"
 fileTarget.ArchiveFileName <- NLog.Layouts.Layout.FromString @"${basedir}\logs\archive\{#}.log"
 fileTarget.ArchiveNumbering <- NLog.Targets.ArchiveNumberingMode.DateAndSequence
@@ -46,27 +44,8 @@ Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
     | _ -> ()
     () )
 
-
 [<EntryPoint>]
 let main argv = 
-    let ckey = 
-        Ctrl.makeMaster 
-            { controlAddress = Ctrl.controlAddress
-              notifyAddress = Ctrl.notifyAddress
-              execcType = Ctrl.ExeccType.WindowsService }
-
-    let start hc =
-        0 = Ctrl.start ckey
-
-    let stop hc =
-        let r = Ctrl.stop ckey
-        Cilnn.Nn.Term()
-        r = 0
-
-    Service.Default
-    |> display_name "Ormonit"
-    |> service_name "Ormonit"
-    |> with_start start
-    |> with_recovery (ServiceRecovery.Default |> restart (min 10))
-    |> with_stop stop
-    |> run
+    printfn "%A" argv
+    CtrlTest.thereShouldOnlyBeOneMaster()
+    0 // return an integer exit code
