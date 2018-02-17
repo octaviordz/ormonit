@@ -17,8 +17,6 @@ type Envelop =
         { msg = (String.Empty, String.Empty)
           timeStamp = DateTimeOffset.MinValue }
 
-let EmptyEnvelop = Envelop.Empty
-
 let serialize (msg : TMsg) : byte array = 
     let ckey, note = msg
     let ksize = Encoding.UTF8.GetByteCount(ckey)

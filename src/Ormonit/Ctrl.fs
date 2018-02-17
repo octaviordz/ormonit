@@ -286,34 +286,51 @@ let rec closeTimedoutSrvs (timeoutMark : DateTimeOffset) (service : ServiceData)
                 | Some(n) -> closeTimedoutSrvs timeoutMark n context
                 | None -> ()
 
-let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : unit = 
-    let now = DateTimeOffset.Now
-    let mutable nmsgs = List.empty
-    
-    let matchTMsg tmsg msgf errorf = 
-        match tmsg with
-            | Error (errn, errm) -> errorf errn errm
-            | Ok (ckey, note) -> msgf ckey note
+let matchCommMessage msgfn errorfn msg = 
+    match msg with
+    | Error (errn, errm) -> errorfn errn errm
+    | Ok (ckey, note) -> msgfn ckey note
 
+let ismsgBuild (context : Context) k n = 
+    log (Tracel(sprintf "[%s] Received note \"%s\"." context.masterKey n))
+    { Comm.Envelop.timeStamp = DateTimeOffset.Now
+      Comm.Envelop.msg = (k, n) }
+    |> Option.Some
+
+let iserrBuild (context : Context) errn errm = 
+    log (Warnl(sprintf "[%s] Received error. Error %i. %s." context.masterKey errn errm))
+    Option.None
+
+let rec listenOn (sok) (context : Context) (c : BlockingCollection<Comm.Envelop>) : unit =
+    let r = 
+        Comm.recv sok
+        |> matchCommMessage (fun k n -> ismsgBuild context k n) 
+                            (fun n m -> iserrBuild context n m)
+    match r with
+    | Option.None -> listenOn sok context c
+    | Option.Some envelop -> 
+        let _, note = envelop.msg
+        let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+        let cmd = 
+            if nparts.Length > 0 then nparts.[0]
+            else String.Empty
+        let args = 
+            List.ofArray (if nparts.Length > 1 then nparts.[1..]
+                          else [||])
+        match Cli.parseArgs (Array.ofList args) with 
+        | Error _ -> 
+            listenOn sok context c
+        | Ok _ -> 
+            c.Add(envelop)
+            if c.TryAdd(envelop) = true then listenOn sok context c
+            else ()
+
+let rec supervise (sok) (nsok) (c : BlockingCollection<Comm.Envelop>) (context : Context) : unit = 
     let ckey, note, envp = 
-        let emptyResult = String.Empty, String.Empty, Comm.EmptyEnvelop
-        let envpFrom ckey note = 
-            let envp = 
-                 { Comm.Envelop.timeStamp = now
-                   Comm.Envelop.msg = (ckey, note) }
-            envp
-        match msgs with
-        | [] -> 
-            let tmsg = Comm.recvWith nsok Cilnn.SendRecvFlags.DONTWAIT
-            let ismsg k n =
-                log (Tracel(sprintf "[%s] Supervise received note \"%s\"." context.masterKey n))
-                k, n, (envpFrom k n)
-            matchTMsg tmsg ismsg (fun _ _ -> emptyResult)
-        | head :: tail -> 
-            nmsgs <- tail
-            let k, n = head.msg
-            log (Tracel(sprintf "[%s] Supervise received internal note \"%s\"." context.masterKey n))
-            k, n, head
+        let envp = c.Take()
+        let k, n = envp.msg
+        log (Tracel(sprintf "[%s] Supervise received note \"%s\"." context.masterKey n))
+        k, n, envp
 
     let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
     
@@ -326,7 +343,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
                       else [||])
     
     match Cli.parseArgs (Array.ofList args) with 
-    | Error _ -> supervise sok nsok nmsgs context
+    | Error _ -> supervise sok nsok c context
     | Ok parsedArgs -> 
 
     match cmd with
@@ -335,31 +352,35 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
         | Error (errn, errm) -> 
             log (Warnl(sprintf """[%s] Error %i on "is-master" (send). %s.""" context.masterKey errn errm))
         | _ -> ()
-        supervise sok nsok nmsgs context
+        supervise sok nsok c context
     | "sys:close" -> 
         if context.execcType = ExeccType.WindowsService && context.masterKey <> ckey then 
             log (Warnl "Not supported when running as Windows Service.")
-            supervise sok nsok nmsgs context
+            supervise sok nsok c context
         else 
             context.services.[0] <- { context.services.[0] with isClosing = true }
             let npid = context.services.[0].processId.ToString()
             // send acknowledgment of closing to note sender
-            Comm.send nsok ("", npid) |> ignore
+            match Comm.send nsok ("", npid) with 
+            | Error (errn, errm) -> 
+                log(Warnl(sprintf """[%s] Unable to acknowled "close". Error %i. %s.""" context.masterKey errn errm))
+            | Ok _ -> 
+                log(Tracel(sprintf """[%s] Acknowledgment of "close" sent.""" context.masterKey))
             log (Debugl("""Supervisor closing. Notify "close" to services."""))
             let notifySrvs() = 
                 match ("", "sys:close") |> Comm.send sok with
                 | Error (errn, errm) -> 
                     match errn with
                     | 156384766 -> 
-                        log(Warnl(sprintf """[%s] Error %i on "close" (send). %s.""" context.masterKey errn errm))
+                        log(Warnl(sprintf """[%s] Unable to notify services (send). Error %i. %s.""" context.masterKey errn errm))
                     | _ -> 
-                        log(Errorl(sprintf """[%s] Error %i on "close" (send). %s.""" context.masterKey errn errm))
+                        log(Errorl(sprintf """[%s] Unable to notify services (send). Error %i. %s.""" context.masterKey errn errm))
                     Result.Error (errn, errm)
                 | r -> 
                     log (Tracel("""Services notified of "close"."""))
                     r
             retryt notifySrvs |> ignore
-            match Comm.recv sok with
+            match Comm.recvv sok with
             | Error (errn, errm) -> 
                 //156384766 Operation cannot be performed in this state
                 if errn = 156384766 then 
@@ -399,7 +420,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
                 if timeoutMark >= envp.timeStamp then Some envp
                 else None
             match stale with
-            | None -> nmsgs <- envp :: nmsgs
+            | None -> c.Add(envp)
             | Some e -> 
                 match Int32.TryParse parsedArgs.["logicId"] with 
                 | false, _ -> 
@@ -425,7 +446,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
                 ("", n)
                 |> Comm.send sok
                 |> ignore
-        supervise sok nsok nmsgs nexecc
+        supervise sok nsok c nexecc
     | "sys:self-init" -> 
         if not (parsedArgs.ContainsKey "processId") then 
             Errorl("""No processId in "self-init" note.""") |> log
@@ -435,7 +456,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
             parsedArgs.ContainsKey "processId"
             && parsedArgs.ContainsKey "processStartTime"
         if not isValidArgs then 
-            supervise sok nsok msgs context
+            supervise sok nsok c context
         else 
         
         let pidr, pid = Int32.TryParse (parsedArgs.["processId"])
@@ -444,13 +465,13 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
         | false, false, _, _ -> 
             Errorl("""Invalid processId in "self-init" note.""") |> log
             Errorl("""Invalid processStartTime in "self-init" note.""") |> log
-            supervise sok nsok msgs context
+            supervise sok nsok c context
         | false, true, _, _ -> 
             Errorl("""Invalid processId in "self-init" note.""") |> log
-            supervise sok nsok msgs context
+            supervise sok nsok c context
         | true, false, _, _ -> 
             Errorl("""Invalid processStartTime in "self-init" note.""") |> log
-            supervise sok nsok msgs context
+            supervise sok nsok c context
         | true, true, pid, pt -> 
 
         let index = 
@@ -467,14 +488,13 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
                 let initenvp = 
                     { Comm.Envelop.timeStamp = DateTimeOffset.Now
                       Comm.Envelop.msg = (context.masterKey, n) }
-                nmsgs <- initenvp :: msgs
-                //nmsgs <- List.append msgs [initenvp]
+                c.Add(initenvp)
                 context.services.[lid] <- { ServiceData.Default with logicId = lid
                                                                      processId = pid
                                                                      openTime = DateTimeOffset(pt) }
             | Error (errn, errm) -> 
                 log (Errorl(sprintf """Error %i on "resp:self-init" (send). %s.""" errn errm))
-            supervise sok nsok nmsgs context
+            supervise sok nsok c context
     | _ -> 
         log(Tracel(sprintf "[%s] Requesting report-status." context.masterKey))
         match (String.Empty, "sys:report-status") |> Comm.send sok with
@@ -505,7 +525,7 @@ let rec supervise (sok) (nsok) (msgs : Comm.Envelop list) (context : Context) : 
         closeTimedoutSrvs timeoutMark context.services.[0] context
         log(Tracel(sprintf "[%s] Supervisor blocking for %ims." context.masterKey superviseInterval))
         let jr = System.Threading.Thread.CurrentThread.Join(superviseInterval)
-        supervise sok nsok nmsgs context
+        supervise sok nsok c context
 
 and waitFor (context : Context) (sok : int) (wl : ServiceData list) = 
     let timeout = TimeSpan.FromMilliseconds(float (serviceTimeout))
@@ -562,10 +582,19 @@ and waitFor (context : Context) (sok : int) (wl : ServiceData list) =
         System.Threading.Thread.CurrentThread.Join(superviseInterval/2) |> ignore
         waitFor context sok nwl
 
-let executeSupervisor (context : Context) (ctrlsok) (nsocket) (msgs) : unit = 
+let executeSupervisor (context : Context) (ctrlsok) (nsocket) (msgs : Comm.Envelop list) : unit = 
+    use c = new BlockingCollection<Comm.Envelop>()
+    msgs |> List.iter (fun it -> c.Add(it))
+    let listenOnCtrl = Thread(ThreadStart(fun () -> listenOn ctrlsok context c))
+    let listenOnNoty = Thread(ThreadStart(fun () -> listenOn nsocket context c))
+    listenOnCtrl.IsBackground <- true
+    listenOnNoty.IsBackground <- true
+    listenOnCtrl.Start()
+    listenOnNoty.Start()
     log (Debugl (sprintf "[%s] Start supervisor." context.masterKey))
-    supervise ctrlsok nsocket msgs context
+    supervise ctrlsok nsocket c context
     traceState context context.services
+    c.CompleteAdding()
     //TODO:Wait for process exit
     log (Debugl (sprintf "[%s] Supervisor stop." context.masterKey))
 
@@ -648,7 +677,10 @@ let openMaster (states : ConcurrentStack<(string * DateTimeOffset)>) (context : 
                         errm 
                         errn))
                 //Address in use. Error 100.
-                if errn = 100 then Cilnn.Nn.Connect(socket, config.["controlAddress"])
+                if errn = 100 then 
+                    log (Tracel(sprintf """[%s] Connecting instead "%s".""" 
+                        context.masterKey (config.["controlAddress"])))
+                    Cilnn.Nn.Connect(socket, config.["controlAddress"])
                 else endpointId
             | endpointId -> endpointId
         let eidr = 
@@ -662,7 +694,10 @@ let openMaster (states : ConcurrentStack<(string * DateTimeOffset)>) (context : 
                         errm 
                         errn))
                 //Address in use. Error 100.
-                if errn = 100 then Cilnn.Nn.Connect(nsok, config.["notifyAddress"])
+                if errn = 100 then 
+                    log (Tracel(sprintf """[%s] Connecting instead "%s".""" 
+                        context.masterKey (config.["controlAddress"])))
+                    Cilnn.Nn.Connect(nsok, config.["notifyAddress"])
                 else endpointId
             | endpointId -> endpointId
         assert (eid >= 0)
@@ -787,14 +822,14 @@ let stop (ckey : Ctlkey) =
     let nsocket = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.SURVEYOR)
     //TODO:error handling for socket and bind
     assert (nsocket >= 0)
-    assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.SNDTIMEO, superviseInterval * 5) = 0)
-    assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.RCVTIMEO, superviseInterval * 5) = 0)
+    assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.SNDTIMEO, 1300) = 0)
+    assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.RCVTIMEO, 1300) = 0)
     let eid = Cilnn.Nn.Connect(nsocket, execc.context.config.["notifyAddress"])
     assert (eid >= 0)
     log (Tracel(sprintf "[Stop Thread][%s] Notify \"%s\"." ckey.key note))
     let mutable masterpid = -1
     let sendr = 
-        retrytWith 10000  (fun () -> 
+        retrytWith 3000  (fun () -> 
             match (execc.context.masterKey, note) |> Comm.send nsocket with
             //11 Resource unavailable, try again
             | Error (11, errm) -> Result.Error (11, errm) //we try again
@@ -804,9 +839,12 @@ let stop (ckey : Ctlkey) =
         log (Warnl(sprintf "[Stop Thread][%s] Unable to notify \"%s\" (send). Error %i %s." ckey.key note errn errm))
     | _ -> ()
     let recvr = 
-        retrytWith 10000 (fun () -> 
+        retrytWith 3000 (fun () -> 
             match Comm.recv nsocket with
-            | Error (errn, errm) -> Result.Error (errn, errm) //we try again
+            | Error (errn, errm) -> 
+                log (Tracel(sprintf "[Stop Thread][%s] No acknowledgment of note \"%s\" (recv). Error %i. %s." 
+                    ckey.key note errn errm))
+                Result.Error (errn, errm) //we try again
             | Ok (m, npid) -> 
                 masterpid <- Int32.Parse(npid) 
                 Result.Ok (m, npid) )
