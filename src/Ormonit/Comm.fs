@@ -10,12 +10,12 @@ type Error = int32 * string
 /// Transmission message
 type TMsg = string * string
 
+type Address = string
+
 type Envelop = 
-    { msg : TMsg
+    { from : Address
+      msg : TMsg
       timeStamp : DateTimeOffset }
-    static member Empty = 
-        { msg = (String.Empty, String.Empty)
-          timeStamp = DateTimeOffset.MinValue }
 
 let serialize (msg : TMsg) : byte array = 
     let ckey, note = msg
@@ -55,7 +55,7 @@ let deserialize (nbytes) (bytes : byte array) =
     //missing c in "lose"
     (ckey, note)
 
-let sendWith (sok) (flags) (msg : TMsg) : Result<TMsg, Error> = 
+let sendWith (flags) (sok) (msg : TMsg) : Result<TMsg, Error> = 
     let nbytes = Nn.Send(sok, (serialize msg), flags)
     if nbytes < 0 then 
         let errn = Nn.Errno()
@@ -63,9 +63,9 @@ let sendWith (sok) (flags) (msg : TMsg) : Result<TMsg, Error> =
         Result.Error (errn, errm)
     else Result.Ok msg
 
-let send (sok) (msg : TMsg) = sendWith sok SendRecvFlags.NONE msg
+let send = sendWith SendRecvFlags.NONE
 
-let recvWith (sok) (flags) : Result<TMsg, Error> = 
+let recvWith (flags) (sok) : Result<TMsg, Error> = 
     let buff = Array.zeroCreate maxMessageSize
     let nbytes = Nn.Recv(sok, buff, flags)
     if nbytes < 0 then 
@@ -74,5 +74,5 @@ let recvWith (sok) (flags) : Result<TMsg, Error> =
         Result.Error (errn, errm)
     else Result.Ok (deserialize nbytes buff)
 
-let recv (sok) = recvWith sok SendRecvFlags.NONE
+let recv = recvWith SendRecvFlags.NONE
 

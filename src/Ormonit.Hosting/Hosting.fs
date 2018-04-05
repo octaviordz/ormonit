@@ -109,9 +109,9 @@ type ServiceHost() =
         let cprocess = Process.GetCurrentProcess()
         let lid = cprocess.Id
         let note = sprintf "sys:self-init --process-id %d --process-start-time %s" cprocess.Id (cprocess.StartTime.ToString("o"))
-        let notyMaster() : Result<Comm.TMsg, Comm.Error> = 
+        let notyMaster () : Result<Comm.TMsg, Comm.Error> = 
             sprintf "Sending \"%s\" note." note |> log.Trace
-            match Comm.sendWith nsok Cilnn.SendRecvFlags.NONE (String.Empty, note) with
+            match Comm.sendWith Cilnn.SendRecvFlags.NONE nsok (String.Empty, note) with
             | Error (errn, errm) -> 
                 match errn with
                 | 156384766 -> 
@@ -136,7 +136,8 @@ type ServiceHost() =
             sprintf """Unable to notify master.""" |> log.Error
         | Ok (k, selfInitResponse) -> 
 
-        let envp = { Comm.Envelop.msg = k, selfInitResponse
+        let envp = { Comm.Envelop.from = Ctrl.notifyAddress
+                     Comm.Envelop.msg = k, selfInitResponse
                      Comm.Envelop.timeStamp = DateTimeOffset.Now }
         let selfinit (msgs : Comm.Envelop list) = 
             let _, note, nmsg = 
