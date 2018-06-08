@@ -10,13 +10,6 @@ type Error = int32 * string
 /// Transmission message
 type TMsg = string * string
 
-type Address = string
-
-type Envelop = 
-    { from : Address
-      msg : TMsg
-      timeStamp : DateTimeOffset }
-
 let serialize (msg : TMsg) : byte array = 
     let ckey, note = msg
     let ksize = Encoding.UTF8.GetByteCount(ckey)

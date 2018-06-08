@@ -1,19 +1,21 @@
-﻿module internal CtrlTest
+﻿module CtrlTest
 
+open Xunit
 open Ctrl
 open System.Threading
 open System.Collections.Generic
 open System.Collections.Concurrent
 
-let makeMaster () = 
-    let controlAddress = "inproc://ormonit/test/control.ipc"
-    let notifyAddress = "inproc://ormonit/test/notify.ipc"
+let internal makeMaster () = 
+    let controlAddress = "ipc://ormonit/test/control.ipc"
+    let notifyAddress = "ipc://ormonit/test/notify.ipc"
     Ctrl.makeMaster
         { controlAddress = controlAddress
           notifyAddress = notifyAddress
           execcType = ExeccType.ConsoleApplication }
- 
-let checkOneMasterSingleThreaded () : unit = 
+
+[<Fact>]
+let thereShouldOnlyBeOneMasterSingleThreaded () : unit = 
     for _ in 0 .. 0 do
         let ck0 = makeMaster()
         let ck1 = makeMaster()
@@ -23,10 +25,13 @@ let checkOneMasterSingleThreaded () : unit =
         let r1 = Ctrl.start ck1
         //assert (r1 <> 0)
         if r1 = 0 then printfn "ERROR multiple master instances"
-        Ctrl.stop ck0 |> ignore
-        Ctrl.stop ck1 |> ignore
+        if r0 = 0 then Ctrl.stop ck0 |> ignore
+        if r1 = 0 then Ctrl.stop ck1 |> ignore
+        r0 = 0 |> Assert.True
+        r1 <> 0 |> Assert.True
 
-let checkOneMasterMultiThreaded () : unit = 
+[<Fact>]
+let thereShouldOnlyBeOneMasterMultiThreaded () : unit = 
     let bag = ConcurrentBag<int * Ctrl.Ctlkey * bool>()
     let threads = List<Thread>()
     for i in 1 .. 2 do
@@ -45,7 +50,8 @@ let checkOneMasterMultiThreaded () : unit =
         Ctrl.stop ck |> ignore
     Cilnn.Nn.Term()
  
+[<Fact>]
 let thereShouldOnlyBeOneMaster () : unit = 
-    checkOneMasterSingleThreaded()
+    thereShouldOnlyBeOneMasterSingleThreaded ()
     //checkOneMasterMultiThreaded()
     ()

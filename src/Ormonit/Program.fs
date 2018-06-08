@@ -234,6 +234,10 @@ let parseAndExecute argv : int =
             //Ctrl.start ctrlKey
             let pubkey, prikey = createAsymetricKeys()
             let states = ConcurrentStack<(string * DateTimeOffset)>()
+            let ad : (string * obj) [] = [|
+                    ("addressMap", System.Collections.Generic.Dictionary<string, int>() :> obj);
+                    ("socketMap", System.Collections.Generic.Dictionary<int, string>() :> obj) |]
+            let data : Map<string, obj> = Map.ofArray ad
             let context = 
                 { Context.masterKey = ""
                   publicKey = pubkey
@@ -241,7 +245,8 @@ let parseAndExecute argv : int =
                   execcType = ExeccType.ConsoleApplication
                   config = config
                   lids = Map.empty
-                  services = Array.create maxOpenServices ServiceData.Default }
+                  services = Array.create maxOpenServices ServiceData.Default 
+                  data = data }
             let opr = openMaster states context
             Cilnn.Nn.Term()
             opr

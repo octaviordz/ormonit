@@ -136,10 +136,10 @@ type ServiceHost() =
             sprintf """Unable to notify master.""" |> log.Error
         | Ok (k, selfInitResponse) -> 
 
-        let envp = { Comm.Envelop.from = Ctrl.notifyAddress
-                     Comm.Envelop.msg = k, selfInitResponse
-                     Comm.Envelop.timeStamp = DateTimeOffset.Now }
-        let selfinit (msgs : Comm.Envelop list) = 
+        let envp = { Ctrl.Envelop.from = Ctrl.notifyAddress
+                     Ctrl.Envelop.msg = k, selfInitResponse
+                     Ctrl.Envelop.timeStamp = DateTimeOffset.Now }
+        let selfinit (msgs : Ctrl.Envelop list) = 
             let _, note, nmsg = 
                 let emptyResult = String.Empty, String.Empty, []
                 match msgs with
@@ -227,7 +227,7 @@ type ServiceHost() =
                let task = runAsync.Invoke(srv, [| rtsrc.Token; ctsrc.Token |]) :?> Task
                services.Add({ ServiceData.None with task = task
                                                     reportStatusTokenSource = rtsrc }) )
-        let rec recvloop (msgs : Comm.Envelop list) = 
+        let rec recvloop (msgs : Ctrl.Envelop list) = 
             //let mutable buff : byte[] = null '\000'
             let k, note, nmsg = 
                 let emptyResult = String.Empty, String.Empty, []
