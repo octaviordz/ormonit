@@ -9,6 +9,7 @@ open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open System.Diagnostics
+open System
 
 module internal Host = 
     let log = LogManager.GetLogger "Ormonit.Hosting"
@@ -196,8 +197,8 @@ type ServiceHost() =
                         else String.Empty
                 sprintf "[%d] Host processing command \"%s\"." lid cmd |> log.Info
                 match cmd with
-                | "sys:resp:self-init" -> 
-                    //"sys:resp:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s"
+                | "sys:r:self-init" -> 
+                    //"sys:r:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s"
                     Ok parsedArgs
                 | unkown -> 
                     Error (sprintf "Unknown message: \"%s\"." unkown)
@@ -216,7 +217,10 @@ type ServiceHost() =
         let eid = Cilnn.Nn.Connect(sok, config.["controlAddress"])
         assert (eid >= 0)
         let lid = Int32.Parse config.["logicId"]
-        let publicKey = config.["publicKey"]
+        let publicKey = 
+            match config.TryGetValue "publicKey" with
+            | false, _ -> None
+            | true, puk -> Some puk
         use ctsrc = new CancellationTokenSource()
         ts
         |> Seq.iter (fun t -> 
@@ -306,8 +310,12 @@ type ServiceHost() =
                     recvloop nmsg
                 | "sys:client-key" -> 
                     log.Trace("""[{0}] Sending client-key: "{1}".""", lid, ckey)
-                    let encrypted = encrypt publicKey ckey
-                    let note = Convert.ToBase64String(encrypted)
+                    let note =
+                        match publicKey with
+                        | None -> ckey
+                        | Some pk -> 
+                            let encrypted = encrypt pk ckey
+                            Convert.ToBase64String(encrypted)
                     match (lid.ToString(), note) |> Comm.send sok with
                     | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
                     | Ok _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, ckey)

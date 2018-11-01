@@ -131,8 +131,12 @@ let private ctrlloop (config : Map<string, string>) =
                 recvloop()
             | "sys:client-key" -> 
                 log.Trace("""[{0}] Sending client-key: "{1}".""", lid, config.["ckey"])
-                let encrypted = encrypt config.["publicKey"] config.["ckey"]
-                let note = Convert.ToBase64String(encrypted)
+                let note = 
+                    match config.TryFind "publicKey" with
+                    | None -> config.["ckey"]
+                    | Some puk -> 
+                        let encrypted = encrypt puk config.["ckey"]
+                        Convert.ToBase64String(encrypted)
                 match (lid.ToString(), note) |> send s with
                 | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
                 | Ok _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])

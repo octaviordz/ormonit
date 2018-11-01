@@ -91,7 +91,7 @@ let parseAndExecute argv : int =
             || (parsedArgs.Count = 1 && parsedArgs.ContainsKey "notify") 
             || (parsedArgs.Count = 1 && parsedArgs.ContainsKey "openMaster") 
             || (parsedArgs.Count = 4 && parsedArgs.ContainsKey "openService" && parsedArgs.ContainsKey "logicId" 
-                && parsedArgs.ContainsKey "publicKey" && parsedArgs.ContainsKey "controlAddress")
+                && parsedArgs.ContainsKey "controlAddress")
         if not validArgs then 
             printUsage()
             okExit
@@ -232,21 +232,28 @@ let parseAndExecute argv : int =
         elif parsedArgs.ContainsKey "openMaster" then 
             //let ctrlKey = Ctrl.makeMaster()
             //Ctrl.start ctrlKey
-            let pubkey, prikey = createAsymetricKeys()
+            let key = randomKey()
+            let (pubkey : string option), (prikey: string option) = 
+                if parsedArgs.ContainsKey "encrypt" then 
+                    let pu, pri = createAsymetricKeys()
+                    Some pu, Some pri
+                else (None, None)
+
             let states = ConcurrentStack<(string * DateTimeOffset)>()
-            let ad : (string * obj) [] = [|
-                    ("addressMap", System.Collections.Generic.Dictionary<string, int>() :> obj);
-                    ("socketMap", System.Collections.Generic.Dictionary<int, string>() :> obj) |]
-            let data : Map<string, obj> = Map.ofArray ad
+            let ad : (string * obj) [] = 
+                [| ("socketMap", System.Collections.Generic.Dictionary<int, string>() :> obj) |]
+            let addressMap = Map.empty<string, SocketInfo>
+            let m : Map<string, obj> = Map.ofArray ad
             let context = 
-                { Context.masterKey = ""
+                { Context.masterKey = key
                   publicKey = pubkey
                   privateKey = prikey
                   execcType = ExeccType.ConsoleApplication
                   config = config
                   lids = Map.empty
                   services = Array.create maxOpenServices ServiceData.Default 
-                  data = data }
+                  data = { AddressMap = addressMap
+                           Map = m } }
             let opr = openMaster states context
             Cilnn.Nn.Term()
             opr

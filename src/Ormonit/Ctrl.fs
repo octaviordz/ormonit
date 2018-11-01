@@ -69,21 +69,38 @@ type ServiceData =
 type ExeccType = 
     | ConsoleApplication = 0
     | WindowsService = 1
+    | ConsoleApplicationSec = 2
+    | WindowsServiceSec = 3
 
 type ServiceSettings = 
     { controlAddress : string
       notifyAddress : string
       execcType : ExeccType }
 
+type SocketFileDescriptor = int
+
+type SocketSend = SocketFileDescriptor
+
+type SocketReceive = SocketFileDescriptor
+
+type SocketInfo =
+    | Send of SocketSend
+    | Receive  of SocketReceive
+    | SendReceive  of SocketSend * SocketReceive
+
+type ContextData =
+    { AddressMap : Map<string, SocketInfo>
+      Map : Map<string, obj> }
+
 type Context = 
     { masterKey : string
-      publicKey : string
-      privateKey : string
+      publicKey : string option
+      privateKey : string option
       execcType : ExeccType
       config : Map<string, string>
       lids : Map<string, int>
       services : ServiceData array 
-      data : Map<string, obj> }
+      data : ContextData }
 
 type internal Execc(thread : Thread, states : ConcurrentStack<(string * DateTimeOffset)>, context : Context) = 
     [<CompiledName("Thread")>]
@@ -102,6 +119,10 @@ type internal Execc(thread : Thread, states : ConcurrentStack<(string * DateTime
 
 type Ctlkey = 
     { key : string }
+
+let (|AddressMap|) (data : ContextData) =
+    match data with
+    | { AddressMap = m } -> m
 
 let rec retryt f = 
     retrytWith actionTimeout f
@@ -274,9 +295,20 @@ let rec closeTimedoutSrvs (timeoutMark : DateTimeOffset) (service : ServiceData)
                         (Warnl(sprintf "[%i] Process identity not confirmed %i %A." srv.logicId srv.processId startTime))
             | false, _ -> ()
             let lid = srv.logicId
+
             let args = 
-                sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" lid context.publicKey ca 
-                    srv.fileName
+                match context.publicKey with 
+                | None ->
+                    sprintf "--logic-id %d --ctrl-address %s --open-service %s" 
+                        lid 
+                        ca 
+                        srv.fileName
+                | Some pk ->
+                    sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" 
+                        lid 
+                        pk 
+                        ca 
+                        srv.fileName
             if not context.services.[0].isClosing then 
                 log (Debugl(sprintf "[%i] Opening service with %s." srv.logicId args))
                 let np = executeProcess ormonitFileName args olog
@@ -314,15 +346,38 @@ let sendWith (flags) (sok) (envp : Envelop) : Result<Envelop, Comm.Error> =
     | Ok _ -> Result.Ok envp
 
 let send = sendWith Cilnn.SendRecvFlags.NONE
-let sendInproc (addressMap : Dictionary<string, int>) = send addressMap.[inprocAddress]
 
-let sendNote (sok) (envp : Envelop) : Result<Envelop, Comm.Error> =
-    match Comm.sendWith Cilnn.SendRecvFlags.NONE sok envp.msg with
-    | Error err -> Result.Error err
-    | Ok _ -> Result.Ok envp
+let (|Send|) (address : SocketInfo) = 
+    match address with
+    | Send s -> Some s
+    | SendReceive (s, _) -> Some s
+    | _ -> None
 
-let recvWith (flags) (addressMap : Dictionary<string, int>) (address : Address) : Result<Envelop, Comm.Error> =
-    let sok = addressMap.[address]
+let (|Receive|) (address : SocketInfo) = 
+    match address with
+    | Receive  s -> Some s
+    | SendReceive (_, s) -> Some s
+    | _ -> None
+
+//let (|Receive|_|) (address : AddressSendReceive) = 
+//    match address with
+//    | AddressReceive s -> Some s
+//    | AddressSendReceive (s, _) -> Some s
+//    | _ -> None
+
+//let (|Receive|) (address : AddressSendReceive) = 
+//    match address with
+//    | (_, receive) ->
+//        match receive with
+//        | AddressReceive.Receive s -> s
+//        | AddressReceive.SendReceive (_, s) -> s
+
+//let sendNote (sok) (envp : Envelop) : Result<Envelop, Comm.Error> =
+//    match Comm.sendWith Cilnn.SendRecvFlags.NONE sok envp.msg with
+//    | Error err -> Result.Error err
+//    | Ok _ -> Result.Ok envp
+
+let recvWith (flags) (sok) (address : Address) : Result<Envelop, Comm.Error> =
     match Comm.recvWith flags sok with
     | Error err -> Result.Error err
     | Ok msg -> 
@@ -355,7 +410,6 @@ let recvWith (flags) (addressMap : Dictionary<string, int>) (address : Address) 
         |> Result.Ok
         
 let recv = recvWith Cilnn.SendRecvFlags.NONE
-let recvInproc (addressMap : Dictionary<string, int>) = recv addressMap inprocAddress
 
 //let matchCommMessage msgfn errorfn msg = 
 //    match msg with
@@ -373,8 +427,7 @@ let recvInproc (addressMap : Dictionary<string, int>) = recv addressMap inprocAd
 //    Option.None
 
 let listenOn (sok) (context : Context) : unit = 
-    let socketMap = context.data.["socketMap"] :?> Dictionary<int, string>
-    //let addressMap = context.data.["addressMap"] :?> Dictionary<string, int>
+    let socketMap = context.data.Map.["socketMap"] :?> Dictionary<int, string>
     let csok = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.REQ)
     //TODO: error handling for socket and bind
     assert (csok >= 0)
@@ -420,11 +473,33 @@ let listenOn (sok) (context : Context) : unit =
     listen ()
     assert (Cilnn.Nn.Shutdown(csok, eidInproc) = 0)
 
-let rec supervise (ctrlsok) (context : Context) : unit = 
-    let addressMap = context.data.["addressMap"] :?> Dictionary<string, int>
-    let sendInproc = sendInproc addressMap
+let sendTo socketInfo envp =
+    match socketInfo with
+    | Send s -> 
+        match s with
+        | Some s -> send s envp
+        | _ -> (Result<Envelop,Comm.Error>.Error (Comm.Error (1, "")))
 
-    match recvInproc addressMap with
+let receiveFrom socketInfo address =
+    match socketInfo with
+    | Receive s -> 
+        match s with
+        | Some s -> recv s address
+        | _ -> Result<Envelop,Comm.Error>.Error (Comm.Error (1, ""))
+
+let rec supervise (ctrlsok) (context : Context) : unit = 
+    let addressMap = 
+        match context.data with
+        | AddressMap  m -> m
+    
+    let sendInproc = 
+        sendTo addressMap.[inprocAddress]
+
+    let recvInproc () = 
+        receiveFrom addressMap.[inprocAddress] inprocAddress
+        
+    log (Tracel(sprintf "[%s] Supervise waiting for note." context.masterKey))
+    match recvInproc () with
     | Error (errn, errm) -> 
         log(Warnl(sprintf """[%s] Unable to received in supervise. Error %i. %s.""" context.masterKey errn errm))
         supervise ctrlsok context
@@ -453,7 +528,7 @@ let rec supervise (ctrlsok) (context : Context) : unit =
             { from = context.config.["notifyAddress"]
               msg = ("", "master")
               timeStamp = DateTimeOffset.Now }
-        match sendNote (addressMap.[envp.from]) resp with
+        match sendTo addressMap.[envp.from] resp with
         | Error (errn, errm) -> 
             log (Warnl(sprintf """[%s] Error %i on "is-master" (send). %s.""" context.masterKey errn errm))
         | _ -> ()
@@ -474,7 +549,7 @@ let rec supervise (ctrlsok) (context : Context) : unit =
                   msg = ("", npid)
                   timeStamp = DateTimeOffset.Now }
             // send acknowledgment of closing to note sender
-            match sendNote (addressMap.[envp.from]) resp with
+            match sendTo addressMap.[envp.from] resp with
             | Error (errn, errm) -> 
                 log(Warnl(sprintf """[%s] Unable to acknowledge "close". Error %i. %s.""" context.masterKey errn errm))
             | Ok _ -> 
@@ -494,7 +569,11 @@ let rec supervise (ctrlsok) (context : Context) : unit =
                         log(Errorl(sprintf """[%s] Unable to notify services (send). Error %i. %s.""" context.masterKey errn errm))
                     Result.Error (errn, errm)
                 | r -> 
-                    log (Tracel(sprintf """[%s] %d Services notified of "close".""" context.masterKey  services.Length))
+                    match services.Length with
+                    | 1 -> 
+                        log (Tracel(sprintf """[%s] %d service notified of "close".""" context.masterKey  services.Length))
+                    | len ->
+                        log (Tracel(sprintf """[%s] %d services notified of "close".""" context.masterKey  len))
                     r
             retryt notifySrvs |> ignore
             match Comm.recv ctrlsok with
@@ -550,7 +629,10 @@ let rec supervise (ctrlsok) (context : Context) : unit =
                     log (Errorl(sprintf "Stale message %A." e))
         | Ok (logicId, ekey) -> 
             let lid = Int32.Parse(logicId)
-            let dr, clientKey = tryDecrypt context.privateKey (Convert.FromBase64String(ekey))
+            let dr, clientKey = 
+                match context.privateKey with 
+                | None -> (true, ekey)
+                | Some prik -> tryDecrypt prik (Convert.FromBase64String(ekey))
             let vckey = 
                 match Array.tryItem lid context.services with
                 | None -> false
@@ -568,7 +650,7 @@ let rec supervise (ctrlsok) (context : Context) : unit =
     | "sys:self-init" -> 
         if not (parsedArgs.ContainsKey "processId") then 
             Errorl("""No processId in "self-init" note.""") |> log
-        if not (parsedArgs.ContainsKey "processId") then 
+        if not (parsedArgs.ContainsKey "processStartTime") then 
             Errorl("""No processStartTime in "self-init" note.""") |> log
         let isValidArgs = 
             parsedArgs.ContainsKey "processId"
@@ -598,22 +680,36 @@ let rec supervise (ctrlsok) (context : Context) : unit =
         match index with 
         | None -> Errorl("Services limit reached.") |> log
         | Some lid -> 
-            let n = sprintf "sys:resp:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s" lid pid context.publicKey context.config.["controlAddress"]
-            match (String.Empty, n) |> Comm.send (addressMap.[envp.from]) with
+            let n = 
+                match context.publicKey with
+                | None ->
+                    sprintf "sys:r:self-init --logic-id %d --process-id %d --ctrl-address %s" lid pid context.config.["controlAddress"]
+                | Some puk ->
+                    sprintf "sys:r:self-init --logic-id %d --process-id %d --public-key %s --ctrl-address %s" lid pid puk context.config.["controlAddress"]
+            let send_ =
+                match addressMap.[envp.from] with 
+                | Send s -> 
+                    match s with
+                    | Some s -> Comm.send s
+                    // supervise receives from inproc/req
+                    // resp 
+                    //| _ -> failwith "Send not supported."
+            match send_ (String.Empty, n) with
             | Ok _ -> 
-                log (Tracel(sprintf """Sent "resp:self-init" note."""))
+                log (Tracel(sprintf """Sent "sys:r:self-init" note."""))
                 let n = sprintf "sys:init-service --logic-id %i" lid
-                let resp = 
+                let renvp = 
                     { envp with
                            timeStamp = DateTimeOffset.Now
                            msg = (context.masterKey, n) }
                 //TODO: error handling
-                sendInproc resp |> ignore
+                sendInproc renvp |> ignore
+                // Where to get envp.from?
                 context.services.[lid] <- { ServiceData.Default with logicId = lid
                                                                      processId = pid
                                                                      openTime = DateTimeOffset(pt) }
             | Error (errn, errm) -> 
-                log (Errorl(sprintf """Error %i on "resp:self-init" (send). %s.""" errn errm))
+                log (Errorl(sprintf """Error %i on "sys:r:self-init" (send). %s.""" errn errm))
             supervise ctrlsok context
     | _ -> 
         log(Tracel(sprintf "[%s] Requesting report-status." context.masterKey))
@@ -856,14 +952,19 @@ let openMaster (states : ConcurrentStack<(string * DateTimeOffset)>) (context : 
             | endpointId -> endpointId
         assert (eid >= 0)
         assert (eidr >= 0)
-        let addressMap = context.data.["addressMap"] :?> Dictionary<string, int>
-        let socketMap = context.data.["socketMap"] :?> Dictionary<int, string>
-        addressMap.Add(config.["controlAddress"], socket)
-        addressMap.Add(config.["notifyAddress"], nsok)
-        addressMap.Add(inprocAddress, csok)
+        let addressMap = context.data.AddressMap
+        let socketMap = context.data.Map.["socketMap"] :?> Dictionary<int, string>
+        let s : SocketFileDescriptor =  socket
+        let addressMap = addressMap.Add(config.["controlAddress"], SendReceive (s, s))
+        let s : SocketFileDescriptor =  nsok
+        let addressMap = addressMap.Add(config.["notifyAddress"], SendReceive (s, s))
+        //addressMap.Add(inprocAddress, AddressSendReceive (csok, x))
+        let s : SocketFileDescriptor =  csok
+        let addressMap = addressMap.Add(inprocAddress, SendReceive (s, s))
         socketMap.Add(socket, config.["controlAddress"])
         socketMap.Add(nsok, config.["notifyAddress"])
         socketMap.Add(csok, inprocAddress)
+        let context = { context with data = { context.data with AddressMap = addressMap }}
         //TODO: Check for already running ormonit services in case master is interrupted/killed externally
         //config <- RequestStatus config socket
         //config <- CollectStatus config q socket
@@ -878,8 +979,16 @@ let openMaster (states : ConcurrentStack<(string * DateTimeOffset)>) (context : 
                     //let ckey = randomKey()
                     let lid = index + i
                     let args = 
-                        sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" lid context.publicKey 
-                            (config.["controlAddress"]) it.Location
+                        match context.publicKey with 
+                        | None ->
+                            sprintf "--logic-id %d --ctrl-address %s --open-service %s" 
+                                lid 
+                                (config.["controlAddress"]) it.Location
+                        | Some puk ->
+                            sprintf "--logic-id %d --public-key %s --ctrl-address %s --open-service %s" 
+                                lid
+                                puk
+                                (config.["controlAddress"]) it.Location
                     let cmdArgs = sprintf "%s %s" ormonitFileName args
                     log (Tracel cmdArgs)
                     let p = executeProcess ormonitFileName args olog
@@ -914,7 +1023,14 @@ let openMaster (states : ConcurrentStack<(string * DateTimeOffset)>) (context : 
 let private shash = Dictionary<string, Execc>()
 
 let makeMaster (configuration : ServiceSettings) = 
-    let pubkey, prikey = createAsymetricKeys()
+    let pubkey, prikey = 
+        if configuration.execcType = ExeccType.WindowsServiceSec 
+            || configuration.execcType = ExeccType.ConsoleApplicationSec 
+        then 
+            let pu, pri = createAsymetricKeys()
+            Some pu, Some pri
+        else (None, None)
+
     let key = randomKey()
     let config = 
         Map.empty.
@@ -922,9 +1038,9 @@ let makeMaster (configuration : ServiceSettings) =
             Add("notifyAddress", configuration.notifyAddress)
     let states  = ConcurrentStack<(string * DateTimeOffset)>()
     let ad : (string * obj) [] = 
-        [| ("addressMap", System.Collections.Generic.Dictionary<string, int>() :> obj)
-           ("socketMap", System.Collections.Generic.Dictionary<int, string>() :> obj) |]
-    let data : Map<string, obj> = Map.ofArray ad
+        [| ("socketMap", System.Collections.Generic.Dictionary<int, string>() :> obj) |]
+    let addressMap = Map.empty<string, SocketInfo>
+    let m : Map<string, obj> = Map.ofArray ad
     let context = 
         { Context.masterKey = key
           publicKey = pubkey
@@ -933,7 +1049,8 @@ let makeMaster (configuration : ServiceSettings) =
           config = config
           lids = Map.empty
           services = Array.create maxOpenServices ServiceData.Default 
-          data = data }
+          data = { AddressMap = addressMap
+                   Map = m } }
     let main = fun () -> openMaster states context |> ignore
     let t = Thread(main)
     t.Name <- context.masterKey
