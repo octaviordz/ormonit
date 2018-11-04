@@ -497,8 +497,10 @@ let rec supervise (ctrlsok) (context : Context) : unit =
 
     let recvInproc () = 
         receiveFrom addressMap.[inprocAddress] inprocAddress
-        
+
     log (Tracel(sprintf "[%s] Supervise waiting for note." context.masterKey))
+    //let _recvSelect = 
+    //    Comm.Select [ recvInproc; requestStatus; ]
     match recvInproc () with
     | Error (errn, errm) -> 
         log(Warnl(sprintf """[%s] Unable to received in supervise. Error %i. %s.""" context.masterKey errn errm))
