@@ -68,7 +68,7 @@ let on_hamster_db_change (e : FileSystemEventArgs) : unit =
         sprintf "Source \"%s\" copied to destination \"%s\"." e.FullPath destinationDbPath |> log.Trace
         ()
 
-let ctrlloop (config : IDictionary<string, string>) = 
+let ctrlloop (config : Map<string, string>) = 
     let ca = config.["controlAddress"]
     let lid = config.["logicId"]
     sprintf "In control loop with: controlAddress \"%s\", logicId \"%s\"." ca lid |> log.Trace
@@ -111,8 +111,12 @@ let ctrlloop (config : IDictionary<string, string>) =
             match cmd with
             | "sys:client-key" -> 
                 log.Trace("""[{0}] Sending client-key: "{1}".""", lid, config.["ckey"])
-                let encrypted = encrypt config.["publicKey"] config.["ckey"]
-                let note = Convert.ToBase64String(encrypted)
+                let note = 
+                    match config.TryFind "publicKey" with
+                    | None -> config.["ckey"]
+                    | Some puk -> 
+                        let encrypted = encrypt puk config.["ckey"]
+                        Convert.ToBase64String(encrypted)
                 match (lid.ToString(), note) |> send s with
                 | Error (errn, errm) -> sprintf """Error %i (send). %s.""" errn errm |> log.Error
                 | Ok _ -> log.Trace("""[{0}] Sent client-key: "{1}".""", lid, config.["ckey"])

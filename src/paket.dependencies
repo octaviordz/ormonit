@@ -4,3 +4,5 @@ nuget LibLog
 nuget NLog
 nuget Topshelf
 nuget System.ValueTuple
+nuget xunit
+nuget xunit.runner.visualstudio
