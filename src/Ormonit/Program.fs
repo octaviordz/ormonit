@@ -82,7 +82,7 @@ let parseAndExecute argv : int =
                               Destination = "processStartTime" }
     match Cli.parseArgs argv with
     | Error exn -> 
-        log (Errorl(exn, String.Empty))
+        Log.Error(exn, String.Empty)
         printUsage()
         okExit
     | Ok parsedArgs -> 
@@ -140,7 +140,7 @@ let parseAndExecute argv : int =
             assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
             let eid = Cilnn.Nn.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
-            log (Tracel (sprintf "[Stop Process] Notify \"%s\"." note))
+            Log.Trace(sprintf "[Stop Process] Notify \"%s\"." note)
             let send() = Comm.send nsocket ("", note)
             
             let result = 
@@ -156,7 +156,7 @@ let parseAndExecute argv : int =
                         | Error (errn, errm) -> Error (errn, errm)
             match result with 
             | Error (errn, errm) -> 
-                log (Warnl (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm))
+                Log.Warn (sprintf "[Stop Process] Unable to notify \"%s\" (send). Error %i %s." note errn errm)
             | _ -> ()
             let recv() = Comm.recv nsocket
             let mutable masterpid = -1
@@ -173,11 +173,9 @@ let parseAndExecute argv : int =
                         (okExit, String.Empty)
                     | Error (errn, errm) -> (errn, errm)
             if errn = okExit then 
-                Infol (sprintf "[Stop Process] Acknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
-                |> log
+                Log.Info(sprintf "[Stop Process] Acknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid) 
             else 
-                Warnl (sprintf "[Stop Process] No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
-                |> log
+                Log.Warn(sprintf "[Stop Process] No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm) 
             Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
             Cilnn.Nn.Close(nsocket) |> ignore
             if errn <> okExit then errorExit
@@ -190,8 +188,7 @@ let parseAndExecute argv : int =
                         p.WaitForExit()
                         okExit
                     with ex -> 
-                        Errorl (sprintf "[Stop Process] Error waiting for master exit. Master pid: %i." masterpid) 
-                        |> log
+                        Log.Error(sprintf "[Stop Process] Error waiting for master exit. Master pid: %i." masterpid) 
                         errorExit
         elif parsedArgs.ContainsKey "notify" then 
             let note = parsedArgs.["notify"]
@@ -203,7 +200,7 @@ let parseAndExecute argv : int =
             assert (Cilnn.Nn.SetSockOpt(nsocket, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
             let eid = Cilnn.Nn.Connect(nsocket, notifyAddress)
             assert (eid >= 0)
-            log (Tracel (sprintf "Notify \"%s\" (notify process)." note))
+            Log.Trace(sprintf "Notify \"%s\" (notify process)." note)
             let bytes = Encoding.UTF8.GetBytes(note)
             let send() = Comm.send nsocket ("", note)
             match send() with
@@ -212,20 +209,20 @@ let parseAndExecute argv : int =
                 match send() with
                 | Ok _ -> ()
                 | Error (errn, errm) -> 
-                    log (Warnl (sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm))
+                    Log.Warn(sprintf "Unable to notify \"%s\" (send). Error %i %s." note errn errm)
             | _ -> ()
             let recv() = Comm.recv nsocket
             let mutable masterpid = -1
             match recv() with
             | Ok (_, npid) -> masterpid <- Int32.Parse(npid)
             | Error (errn, errm) -> //we try again
-                log (Tracel (sprintf "No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+                Log.Trace(sprintf "No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm)
                 match recv() with
                 | Ok (_, npid) -> masterpid <- Int32.Parse(npid)
                 | Error (errn, errm) -> 
-                    log (Warnl (sprintf "No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm))
+                    Log.Warn(sprintf "No acknowledgment of note \"%s\" (recv). Error %i %s." note errn errm)
             if masterpid <> -1 then 
-                log (Infol (sprintf "Acknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid))
+                Log.Info(sprintf "Acknowledgment of note \"%s\" (recv). Master pid: %i." note masterpid)
             Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
             Cilnn.Nn.Close(nsocket) |> ignore
             okExit
@@ -268,7 +265,7 @@ let parseAndExecute argv : int =
 
 [<EntryPoint>]
 let main argv = 
-    log (Tracel (sprintf "Run with arguments \"%s\"" (String.Join(" ", argv))))
+    Log.Trace(sprintf "Run with arguments \"%s\"" (String.Join(" ", argv)))
     try 
         match List.ofArray argv with
         | [] -> 
@@ -279,11 +276,11 @@ let main argv =
         | argl -> Array.ofList argl |> parseAndExecute
     with ex -> 
         if isNull ex.InnerException then 
-            Errorl (sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message) |> log
-            Errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
+            Log.Error (sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message)
+            Log.Error (sprintf "StackTrace: %s" ex.StackTrace)
         else 
-            Errorl 
-                (sprintf "Command failed.\nErrorType:%s\nError:\n%s\nInnerException:\n%s" (ex.GetType().Name) ex.Message 
-                     ex.InnerException.Message) |> log
-            Errorl (sprintf "StackTrace: %s" ex.StackTrace) |> log
+            Log.Error(sprintf "Command failed.\nErrorType:%s\nError:\n%s\nInnerException:\n%s"
+                              (ex.GetType().Name) ex.Message 
+                              ex.InnerException.Message)
+            Log.Error(sprintf "StackTrace: %s" ex.StackTrace)
         errorExit

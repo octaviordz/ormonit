@@ -59,35 +59,100 @@ module Logging =
         member x.MsgFunc = msgFunc
         member x.Exception = ex
     
-    type Tracel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
+    type TraceLevel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
         inherit LogFormat<'T>(LogLevel.Trace, msgFunc)
-        new(ex : exn, msg : string) = Tracel(ex, asFunc (msg), [||])
-        new(msg : string) = Tracel(null, asFunc (msg), [||])
-        new(msgFunc : Func<string>) = Tracel(null, msgFunc, [||])
+        new(ex : exn, msg : string) = TraceLevel(ex, asFunc (msg), [||])
+        new(msg : string) = TraceLevel(null, asFunc (msg), [||])
+        new(msgFunc : Func<string>) = TraceLevel(null, msgFunc, [||])
     
-    type Debugl<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
+    type DebugLevel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
         inherit LogFormat<'T>(LogLevel.Debug, msgFunc)
-        new(msg : string) = Debugl(null, asFunc (msg), [||])
+        new(ex : exn, msg : string) = DebugLevel(ex, asFunc (msg), [||])
+        new(msg : string) = DebugLevel(null, asFunc (msg), [||])
+        new(msgFunc : Func<string>) = DebugLevel(null, msgFunc, [||])
     
-    type Infol<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
+    type InfoLevel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
         inherit LogFormat<'T>(LogLevel.Info, msgFunc)
-        new(msg : string) = Infol(null, asFunc (msg), [||])
+        new(ex : exn, msg : string) = InfoLevel(ex, asFunc (msg), [||])
+        new(msg : string) = InfoLevel(null, asFunc (msg), [||])
+        new(msgFunc : Func<string>) = InfoLevel(null, msgFunc, [||])
     
-    type Warnl<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
+    type WarnLevel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
         inherit LogFormat<'T>(LogLevel.Warn, msgFunc)
-        new(msg : string) = Warnl(null, asFunc (msg), [||])
+        new(ex : exn, msg : string) = WarnLevel(ex, asFunc (msg), [||])
+        new(msg : string) = WarnLevel(null, asFunc (msg), [||])
+        new(msgFunc : Func<string>) = WarnLevel(null, msgFunc, [||])
     
-    type Errorl<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
+    type ErrorLevel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
         inherit LogFormat<'T>(LogLevel.Error, msgFunc)
-        new(ex : exn, msg : string) = Errorl(ex, asFunc (msg), [||])
-        new(msg : string) = Errorl(null, asFunc (msg), [||])
+        new(ex : exn, msg : string) = ErrorLevel(ex, asFunc (msg), [||])
+        new(msg : string) = ErrorLevel(null, asFunc (msg), [||])
+        new(msgFunc : Func<string>) = ErrorLevel(null, msgFunc, [||])
     
-    type Fatall<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
+    type FatalLevel<'T>(ex : exn, msgFunc : Func<string>, formatParameters : obj array) = 
         inherit LogFormat<'T>(LogLevel.Fatal, msgFunc)
-        new(msg : string) = Fatall(null, asFunc (msg), [||])
+        new(ex : exn, msg : string) = FatalLevel(ex, asFunc (msg), [||])
+        new(msg : string) = FatalLevel(null, asFunc (msg), [||])
+        new(msgFunc : Func<string>) = FatalLevel(null, msgFunc, [||])
     
     let log (logFormat : LogFormat<'T>) : unit = logf logFormat.LogLevel logFormat.MsgFunc logFormat.Exception [||]
+    
+    [<Sealed>]
+    type Log = 
+        static member Trace(msg : string) = 
+            log (TraceLevel msg)
 
+        static member Trace(ex : exn, msg : string) = 
+            log (TraceLevel(ex,  msg))
+
+        static member Trace(msgFunc : Func<string>) = 
+            log (TraceLevel(msgFunc))
+
+        static member Debug(msg : string) = 
+            log (DebugLevel msg)
+
+        static member Debug(ex : exn, msg : string) = 
+            log (DebugLevel(ex,  msg))
+
+        static member Debug(msgFunc : Func<string>) = 
+            log (DebugLevel(msgFunc))
+        
+        static member Info(msg : string) = 
+            log (InfoLevel msg)
+
+        static member Info(ex : exn, msg : string) = 
+            log (InfoLevel(ex,  msg))
+
+        static member Info(msgFunc : Func<string>) = 
+            log (InfoLevel(msgFunc))
+        
+        static member Warn(msg : string) = 
+            log (WarnLevel msg)
+
+        static member Warn(ex : exn, msg : string) = 
+            log (WarnLevel(ex,  msg))
+
+        static member Warn(msgFunc : Func<string>) = 
+            log (WarnLevel(msgFunc))
+        
+        static member Error(msg : string) = 
+            log (ErrorLevel msg)
+
+        static member Error(ex : exn, msg : string) = 
+            log (ErrorLevel(ex,  msg))
+
+        static member Error(msgFunc : Func<string>) = 
+            log (ErrorLevel(msgFunc))
+
+        static member Fatal(msg : string) = 
+            log (FatalLevel msg)
+
+        static member Fatal(ex : exn, msg : string) = 
+            log (FatalLevel(ex,  msg))
+
+        static member Fatal(msgFunc : Func<string>) = 
+            log (FatalLevel(msgFunc))
+            
 module Security =
     let randomKey() = 
         use rngCryptoServiceProvider = new RNGCryptoServiceProvider()
