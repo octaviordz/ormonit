@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+# Visual Studio 15
+VisualStudioVersion = 15.0.27130.2026
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".paket", ".paket", "{7AC2AF53-D09D-43B3-9ABB-E0C5FD49027B}"
 	ProjectSection(SolutionItems) = preProject
@@ -16,13 +16,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "nanomsg", "nanomsg", "{2BB6
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "x64", "x64", "{2B4C8BAC-61A5-467F-9171-24B80317E82F}"
 	ProjectSection(SolutionItems) = preProject
-		..\lib\nanomsg\x64\libnanomsg.so = ..\lib\nanomsg\x64\libnanomsg.so
 		..\lib\nanomsg\x64\nanomsg.dll = ..\lib\nanomsg\x64\nanomsg.dll
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "x86", "x86", "{FBB18ACD-0675-4105-B4F8-FF042DE276C7}"
 	ProjectSection(SolutionItems) = preProject
-		..\lib\nanomsg\x86\libnanomsg.so = ..\lib\nanomsg\x86\libnanomsg.so
 		..\lib\nanomsg\x86\nanomsg.dll = ..\lib\nanomsg\x86\nanomsg.dll
 	EndProjectSection
 EndProject
@@ -35,6 +33,12 @@ EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ormonit.Hosting", "Ormonit.Hosting\Ormonit.Hosting.fsproj", "{57583A0B-8B98-4D3B-9A08-E48290B2A59E}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ormonit.WinService", "Ormonit.WinService\Ormonit.WinService.fsproj", "{0BDE82E5-6930-4D50-B076-D6D4618A2260}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Cilnn", "Cilnn\Cilnn.csproj", "{9DAA843D-B32A-4A4E-B29F-397FB6602B38}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "test", "test", "{13AF25A2-1F1A-4650-A1D0-7E648884EFA5}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "Ormonit.Test", "Ormonit.Test\Ormonit.Test.fsproj", "{E19A653B-78D3-4955-BF0E-62DC7D07EEA1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -54,10 +58,6 @@ Global
 		{175E4FCE-E478-4F2D-9021-E6EF2C07D629}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{175E4FCE-E478-4F2D-9021-E6EF2C07D629}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{175E4FCE-E478-4F2D-9021-E6EF2C07D629}.Release|Any CPU.Build.0 = Release|Any CPU
-		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Release|Any CPU.Build.0 = Release|Any CPU
 		{6DDF8923-6357-48E0-83BD-1D579728673B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{6DDF8923-6357-48E0-83BD-1D579728673B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6DDF8923-6357-48E0-83BD-1D579728673B}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -66,6 +66,18 @@ Global
 		{57583A0B-8B98-4D3B-9A08-E48290B2A59E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{57583A0B-8B98-4D3B-9A08-E48290B2A59E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{57583A0B-8B98-4D3B-9A08-E48290B2A59E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0BDE82E5-6930-4D50-B076-D6D4618A2260}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9DAA843D-B32A-4A4E-B29F-397FB6602B38}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9DAA843D-B32A-4A4E-B29F-397FB6602B38}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9DAA843D-B32A-4A4E-B29F-397FB6602B38}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9DAA843D-B32A-4A4E-B29F-397FB6602B38}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E19A653B-78D3-4955-BF0E-62DC7D07EEA1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E19A653B-78D3-4955-BF0E-62DC7D07EEA1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E19A653B-78D3-4955-BF0E-62DC7D07EEA1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E19A653B-78D3-4955-BF0E-62DC7D07EEA1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -74,5 +86,9 @@ Global
 		{2BB64FA5-A9D2-4B4D-94EE-7F91181C7C36} = {9820D62C-2261-41B9-A6EB-FF3EF4F461E9}
 		{2B4C8BAC-61A5-467F-9171-24B80317E82F} = {2BB64FA5-A9D2-4B4D-94EE-7F91181C7C36}
 		{FBB18ACD-0675-4105-B4F8-FF042DE276C7} = {2BB64FA5-A9D2-4B4D-94EE-7F91181C7C36}
+		{E19A653B-78D3-4955-BF0E-62DC7D07EEA1} = {13AF25A2-1F1A-4650-A1D0-7E648884EFA5}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {C2D14392-8D15-4C73-8A77-8CF30E99E984}
 	EndGlobalSection
 EndGlobal

@@ -10,7 +10,8 @@ namespace Archivar
 {
     class Program
     {
-        static ILog log = LogProvider.GetLogger("Archivar");
+        static ILog log = LogProvider.GetLogger($"{nameof(Archivar)}.{nameof(ArchiveService)}");
+
 
         static void Main(string[] args)
         {
