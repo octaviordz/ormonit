@@ -53,45 +53,48 @@ Ormonit.Logging.setLogFun (fun logLevel msgFunc ex formatParameters ->
     | _ -> ()
     ())
 
+let private cliOptions =
+    [ { Cli.option with name = "command"
+                        shortName = "cmd" }
+      { Cli.option with name = "notify"
+                        shortName = "n" }
+      { Cli.option with name = "open-master" }
+      { Cli.option with name = "open-service" }
+      { Cli.option with name = "ctrl-address" }
+      { Cli.option with name = "logic-id" }
+      { Cli.option with name = "public-key" }
+      { Cli.option with name = "process-id"
+                        shortName = "pid" }
+      { Cli.option with name = "process-start-time"
+                        shortName = "pstartt" } ]
+
+let parseArgs (args : string list) = 
+    let parser = new Cli.Parser(cliOptions)
+    try 
+        let result = parser.Parse (Array.ofList args)
+        Ok result
+    with ex -> 
+        printf "%A" ex
+        Error ex
+
 let parseAndExecute argv : int = 
     let config = 
         Map.empty.
-            Add("controlAddress", Ctrl.controlAddress).
-            Add("notifyAddress", Ctrl.notifyAddress)
-    Cli.addArg { Cli.arg with Option = "-cmd"
-                              LongOption = "--command"
-                              Destination = "command" }
-    Cli.addArg { Cli.arg with Option = "-n"
-                              LongOption = "--notify"
-                              Destination = "notify" }
-    Cli.addArg { Cli.arg with Option = "--open-master"
-                              Destination = "openMaster" }
-    Cli.addArg { Cli.arg with Option = "--open-service"
-                              Destination = "openService" }
-    Cli.addArg { Cli.arg with Option = "--ctrl-address"
-                              Destination = "controlAddress" }
-    Cli.addArg { Cli.arg with Option = "--logic-id"
-                              Destination = "logicId" }
-    Cli.addArg { Cli.arg with Option = "--public-key"
-                              Destination = "publicKey" }
-    Cli.addArg { Cli.arg with Option = "-pid"
-                              LongOption = "--process-id"
-                              Destination = "processId" }
-    Cli.addArg { Cli.arg with Option = "-pstartt"
-                              LongOption = "--process-start-time"
-                              Destination = "processStartTime" }
-    match Cli.parseArgs argv with
+            Add("control-address", Ctrl.controlAddress).
+            Add("notify-address", Ctrl.notifyAddress)
+        
+    match parseArgs argv with
     | Error exn -> 
         Log.Error(exn, String.Empty)
         printUsage()
         okExit
     | Ok parsedArgs -> 
-        let validArgs = 
+        let validArgs =
             (parsedArgs.Count = 1 && parsedArgs.ContainsKey "command") 
             || (parsedArgs.Count = 1 && parsedArgs.ContainsKey "notify") 
-            || (parsedArgs.Count = 1 && parsedArgs.ContainsKey "openMaster") 
-            || (parsedArgs.Count = 4 && parsedArgs.ContainsKey "openService" && parsedArgs.ContainsKey "logicId" 
-                && parsedArgs.ContainsKey "controlAddress")
+            || (parsedArgs.Count = 1 && parsedArgs.ContainsKey "open-master") 
+            || (parsedArgs.Count = 4 && parsedArgs.ContainsKey "open-service" && parsedArgs.ContainsKey "logic-id" 
+                && parsedArgs.ContainsKey "control-address")
         if not validArgs then 
             printUsage()
             okExit
@@ -163,8 +166,14 @@ let parseAndExecute argv : int =
             
             let errn, errm = 
                 match recv() with
-                | Ok (_, npid) -> 
-                    masterpid <- Int32.Parse(npid)
+                | Ok (_, msg) -> 
+                    let nparts = msg.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+                    let pid = nparts.[0]
+                    //let p =
+                    //    match nparts |> List.ofArray with
+                    //    | l when l.Length > 4 -> l.[0..l.Length - 5]
+                    //    | l -> l
+                    masterpid <- Int32.Parse(pid)
                     (okExit, String.Empty)
                 | Error (errn, errm) -> //we try again
                     match recv() with
@@ -226,7 +235,7 @@ let parseAndExecute argv : int =
             Cilnn.Nn.Shutdown(nsocket, eid) |> ignore
             Cilnn.Nn.Close(nsocket) |> ignore
             okExit
-        elif parsedArgs.ContainsKey "openMaster" then 
+        elif parsedArgs.ContainsKey "open-master" then 
             //let ctrlKey = Ctrl.makeMaster()
             //Ctrl.start ctrlKey
             let key = randomKey()
@@ -254,8 +263,8 @@ let parseAndExecute argv : int =
             let opr = openMaster states context
             Cilnn.Nn.Term()
             opr
-        elif parsedArgs.ContainsKey "openService" then 
-            let runArg = parsedArgs.["openService"]
+        elif parsedArgs.ContainsKey "open-service" then 
+            let runArg = parsedArgs.["open-service"]
             let srvconfig = 
                 config.Add("logicId", parsedArgs.["logicId"]).Add("publicKey", parsedArgs.["publicKey"])
                       .Add("assemblyPath", runArg)
@@ -271,9 +280,9 @@ let main argv =
         | [] -> 
             printUsage()
             okExit
-        | "start" :: tail -> Array.ofList ([ "-cmd"; "start" ] @ tail) |> parseAndExecute
-        | "stop" :: tail -> Array.ofList ([ "-cmd"; "stop" ] @ tail) |> parseAndExecute
-        | argl -> Array.ofList argl |> parseAndExecute
+        | "start" :: tail -> [ "-cmd"; "start" ] @ tail |> parseAndExecute
+        | "stop" :: tail -> [ "-cmd"; "stop" ] @ tail |> parseAndExecute
+        | argl -> argl |> parseAndExecute
     with ex -> 
         if isNull ex.InnerException then 
             Log.Error (sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message)

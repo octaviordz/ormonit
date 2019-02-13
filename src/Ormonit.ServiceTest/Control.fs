@@ -46,6 +46,28 @@ let mutable lid = -1
 let mutable private continu = true
 let private mlock = obj()
 
+let private parser = new Cli.Parser([
+      { Cli.option with name = "notify"
+                        shortName = "n" }
+      { Cli.option with name = "open-master" }
+      { Cli.option with name = "open-service" }
+      { Cli.option with name = "ctrl-address" }
+      { Cli.option with name = "logic-id" }
+      { Cli.option with name = "public-key" }
+      { Cli.option with name = "process-id"
+                        shortName = "pid" }
+      { Cli.option with name = "process-start-time"
+                        shortName = "pstartt" }
+    ])
+
+let private parseArgs (argv : string []) = 
+    try 
+        let result = parser.Parse argv
+        Ok result
+    with ex -> 
+        printf "%A" ex
+        Result.Error ex
+
 let encrypt publicKey (data : string) : byte array = 
     let cspParams = CspParameters()
     cspParams.ProviderType <- 1
@@ -63,7 +85,7 @@ let randomKey() =
     r
 
 let private ctrlloop (config : Map<string, string>) = 
-    let ca = config.["controlAddress"]
+    let ca = config.["control-address"]
     sprintf "[%i] Ormonit test in control loop with" lid |> log.Trace
     let s = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
     //TODO:error handling for socket and connect
@@ -81,25 +103,24 @@ let private ctrlloop (config : Map<string, string>) =
         | Ok (_, note) -> 
             sprintf "[%i] Ormonit test \"%s\" note received." lid note |> log.Info
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
-            
-            let args = 
-                if nparts.Length > 1 then nparts.[1..]
-                else [||]
+            let args =
+                if nparts.Length = 0 then nparts
+                else nparts.[1..]
             
             let cmd = 
-                match Cli.parseArgs args with
+                match parseArgs args with
                 | Error exn -> 
                     sprintf "[%i] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                     note
                 | Ok parsed -> 
-                    match parsed.TryGetValue "logicId" with
-                    | false, _ -> 
+                    match  parsed |> Map.tryFind "logic-id" with
+                    | None -> 
                         sprintf "[%i] No logicId in note \"%s\"." lid note |> log.Warn
                         note
-                    | true, logicId when logicId <> lid.ToString() -> 
+                    | Some logicId when logicId <> lid.ToString() -> 
                         sprintf "[%i] Invalid logicId ignoring note \"%s\". " lid note |> log.Warn
                         String.Empty
-                    | true, logicId -> 
+                    | Some logicId -> 
                         if nparts.Length > 0 then nparts.[0]
                         else String.Empty
             
@@ -162,12 +183,10 @@ let rec private action() =
         action()
 
 let Start(config : Map<string, string>) = 
-    Cli.addArg { Cli.arg with Option = "--logic-id"
-                              Destination = "logicId" }
     //let ckey = randomKey()
     let ckey = "0123456789AB"
-    let p, logicId = Int32.TryParse config.["logicId"]
-    if not p then raise (ArgumentException("locigId"))
+    let p, logicId = Int32.TryParse config.["logic-id"]
+    if not p then raise (ArgumentException("locig-id"))
     lid <- logicId
     let nconfig = config.Add("ckey", ckey)
     let smsg = sprintf "[%i] Start with configuration: %A." lid nconfig
