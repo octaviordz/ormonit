@@ -165,7 +165,7 @@ type ServiceHost() =
                 List.ofArray (if nparts.Length > 1 then nparts.[1..]
                               else [||])
 
-            match Cli.parseArgs (Array.ofList args) with 
+            match Cli.parseArgs args with 
             | Error ex -> 
                 sprintf "[%d] Host unable to parse arguments in note \"%s\"." lid note |> log.Warn
                 Error ex.Message
@@ -256,7 +256,7 @@ type ServiceHost() =
                 List.ofArray (if nparts.Length > 1 then nparts.[1..]
                               else [||])
     
-            match Cli.parseArgs (Array.ofList args) with 
+            match Cli.parseArgs args with 
             | Error _ -> 
                 sprintf "[%d] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                 recvloop nmsg

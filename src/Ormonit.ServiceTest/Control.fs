@@ -83,8 +83,9 @@ let private ctrlloop (config : Map<string, string>) =
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             
             let args = 
-                if nparts.Length > 1 then nparts.[1..]
-                else [||]
+                match nparts |> List.ofArray with
+                | [] -> []
+                | l -> l.[1..]
             
             let cmd = 
                 match Cli.parseArgs args with

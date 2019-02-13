@@ -378,12 +378,14 @@ let (|Receive|) (address : SocketInfo) =
 let recvWith (flags) (sok) (address : Address) : Result<Envelop, Comm.Error> =
     match Comm.recvWith flags sok with
     | Error err -> Result.Error err
-    | Ok msg -> 
+    | Ok msg ->
+        // originalNote --envp:from ipc://ormonit/notify.ipc --envp:timeStamp 2019-01-15T19:46:54.6593458-07:00
         let _, note = msg
         let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
-        let args = 
-            if nparts.Length > 1 then nparts.[1..]
-            else [||]
+        let args =
+            match nparts |> List.ofArray with
+            | [] -> []
+            | l -> l.[1..]
         let writeEnvp envp = 
             match parseEnvp args with
             | Error exn -> 
@@ -454,8 +456,9 @@ let listenOn (sok) (context : Context) : unit =
                 if nparts.Length > 0 then nparts.[0]
                 else String.Empty
             let args = 
-                if nparts.Length > 1 then nparts.[1..]
-                else [||]
+                match nparts |> List.ofArray with
+                | [] -> []
+                | l -> l.[1..]
             match Cli.parseArgs args with 
             | Error _ -> 
                 listen ()
@@ -508,18 +511,24 @@ let rec supervise (ctrlsok) (context : Context) : unit =
 
     let ckey, note = envp.msg
     Log.Trace(sprintf "[%s] Supervise received note \"%s\"." context.masterKey note)
+    
+    { from = inprocAddress
+      msg = ("", "master")
+      timeStamp = DateTimeOffset.Now }
+    |> sendInproc
+    |> ignore
 
-    let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+    let nparts = 
+        note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+        |> List.ofArray
     
-    let cmd = 
-        if nparts.Length > 0 then nparts.[0]
-        else String.Empty
-    
-    let args = 
-        List.ofArray (if nparts.Length > 1 then nparts.[1..]
-                      else [||])
-    
-    match Cli.parseArgs (Array.ofList args) with 
+    let cmd, args = 
+        match nparts with
+        | [] -> String.Empty, []
+        | x :: [] -> x, []
+        | x :: xs-> x, xs
+
+    match  args |> Cli.parseArgs with
     | Error _ -> supervise ctrlsok context
     | Ok parsedArgs -> 
 
@@ -837,8 +846,9 @@ let executeSupervisor (context : Context) (ctrlsok) (nsocket) (msgs : Envelop li
             let _, note = envelop.msg
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             let args = 
-                if nparts.Length > 1 then nparts.[1..]
-                else [||]
+                match nparts |> List.ofArray with
+                | [] -> []
+                | l -> l.[1..]
             match Cli.parseArgs args with 
             | Error _ -> 
                 loop ()

@@ -163,8 +163,14 @@ let parseAndExecute argv : int =
             
             let errn, errm = 
                 match recv() with
-                | Ok (_, npid) -> 
-                    masterpid <- Int32.Parse(npid)
+                | Ok (_, msg) -> 
+                    let nparts = msg.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
+                    let pid = nparts.[0]
+                    //let p =
+                    //    match nparts |> List.ofArray with
+                    //    | l when l.Length > 4 -> l.[0..l.Length - 5]
+                    //    | l -> l
+                    masterpid <- Int32.Parse(pid)
                     (okExit, String.Empty)
                 | Error (errn, errm) -> //we try again
                     match recv() with
@@ -271,9 +277,9 @@ let main argv =
         | [] -> 
             printUsage()
             okExit
-        | "start" :: tail -> Array.ofList ([ "-cmd"; "start" ] @ tail) |> parseAndExecute
-        | "stop" :: tail -> Array.ofList ([ "-cmd"; "stop" ] @ tail) |> parseAndExecute
-        | argl -> Array.ofList argl |> parseAndExecute
+        | "start" :: tail -> [ "-cmd"; "start" ] @ tail |> parseAndExecute
+        | "stop" :: tail -> [ "-cmd"; "stop" ] @ tail |> parseAndExecute
+        | argl -> argl |> parseAndExecute
     with ex -> 
         if isNull ex.InnerException then 
             Log.Error (sprintf "Command failed.\nErrorType:%s\nError:\n%s" (ex.GetType().Name) ex.Message)

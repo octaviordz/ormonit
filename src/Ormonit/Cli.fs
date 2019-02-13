@@ -46,12 +46,12 @@ let private tokenType token =
     elif isShortOption token then "option"
     else "string"
 
-let parseArgs args = 
+let parseArgs (args : string list) = 
     try 
-        let mutable result = Dictionary<string, string>()
+        let result = Dictionary<string, string>()
         let tokenList = List<string>()
         let tokenTypeList = List<string>()
-        args |> Array.iteri (fun i arg -> 
+        args |> List.iteri (fun i arg -> 
                     let token, ttype = 
                         let mutable t = arg
                         let tt = tokenType arg
@@ -71,7 +71,7 @@ let parseArgs args =
                             if args.Length > i + 1 then args.[i + 1]
                             else ""
                         
-                        let tt = tokenType (narg)
+                        let tt = tokenType narg
                         if tt = "string" then result.Add(option.Destination, narg))
         Ok result
     with ex -> 
