@@ -17,13 +17,20 @@ namespace Archivar
         {
         }
 
+        public string ReportStatus()
+        {
+            return "ok";
+        }
+
         public Task RunAsync(ReportStatusToken reportStatusToken, CancellationToken cancellationToken)
         {
+            var cwait = cancellationToken.WaitHandle;
             //%APPDATA%\Roaming\hamster-applet
             var p = Path.Combine(appData, "hamster-applet");
             var taskf = new TaskFactory();
             var result = Task.Run(() =>
             {
+                reportStatusToken.Register(ReportStatus);
                 using (var watcher = new FileSystemWatcher())
                 {
                     watcher.Path = p;
@@ -37,13 +44,10 @@ namespace Archivar
                     watcher.Created += WatcherOnChanged;
                     log.Trace("Begin watching.");
                     watcher.EnableRaisingEvents = true;
+                    cwait.WaitOne();
+                    watcher.Changed -= WatcherOnChanged;
+                    watcher.Created -= WatcherOnChanged;
                 }
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    reportStatusToken.Report();
-                }
-                watcher.Changed -= WatcherOnChanged;
-                watcher.Created -= WatcherOnChanged;
             });
             return result;
         }
