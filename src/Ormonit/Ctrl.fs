@@ -16,7 +16,7 @@ open System.Collections.Concurrent
 let maxOpenServices = 50
 let maxMessageSize = Comm.maxMessageSize
 //time in milliseconds supervise waits before runs again
-let superviseInterval = 100
+let superviseInterval = 10000
 //time in milliseconds a service has to reply before timingout
 let serviceTimeout = 3000
 let actionTimeout = 30

@@ -130,8 +130,7 @@ type ServiceHost() =
                     sprintf """Master notified of "%s" with response "%s".""" note m |> log.Trace
                     Ok (k, m)
         let notified = Ctrl.retrytWith 60000 notyMaster
-        Cilnn.Nn.Shutdown(nsok, eid) |> ignore
-        Cilnn.Nn.Close(nsok) |> ignore
+        
         match notified with
         | Error _ -> 
             sprintf """Unable to notify master.""" |> log.Error
@@ -206,9 +205,14 @@ type ServiceHost() =
         match Ctrl.retrytWith 5000 (fun () -> selfinit [envp]) with 
         | Error exm -> 
             sprintf "[%d] Host unable to self-initialize. \"%s\"" lid exm |> log.Error
+            Cilnn.Nn.Shutdown(nsok, eid) |> ignore
+            Cilnn.Nn.Close(nsok) |> ignore
             ()
         | Ok config -> 
-
+        // Close previous surveyor
+        Cilnn.Nn.Shutdown(nsok, eid) |> ignore
+        Cilnn.Nn.Close(nsok) |> ignore
+        // Connect as respondent
         let sok = Cilnn.Nn.Socket(Cilnn.Domain.SP, Cilnn.Protocol.RESPONDENT)
         assert (Cilnn.Nn.SetSockOpt(sok, Cilnn.SocketOption.SNDTIMEO, Ctrl.superviseInterval * 5) = 0)
         assert (Cilnn.Nn.SetSockOpt(sok, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
@@ -291,11 +295,11 @@ type ServiceHost() =
                 | "sys:report-status" -> 
                     log.Trace("""[{0}] Processing "report-status" command.""", lid)
                     let errors = 
-                        services |> Seq.fold (fun notOk it -> 
+                        (List.empty, services) ||> Seq.fold (fun notOk it -> 
                                         let status = it.reportStatusTokenSource.ReportStatus(float (Ctrl.actionTimeout))
                                         match status with
                                         | "ok" -> notOk
-                                        | nok -> { it with state = nok } :: notOk ) List.empty
+                                        | nok -> { it with state = nok } :: notOk )
 
                     let summaryNote = 
                         match errors with
