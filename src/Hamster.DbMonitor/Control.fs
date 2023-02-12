@@ -4,7 +4,6 @@ open System
 open System.IO
 open NLog
 open NLog.Layouts
-open System.Collections.Generic
 open System.Text
 open System.Security.Cryptography
 open Cilnn
@@ -38,6 +37,28 @@ let rule2 = new NLog.Config.LoggingRule("Hamster.*", LogLevel.Trace, fileTarget)
 logConfig.LoggingRules.Add(rule2)
 LogManager.Configuration <- logConfig
 
+let private parser = new Cli.Parser([
+      { Cli.option with name = "notify"
+                        shortName = "n" }
+      { Cli.option with name = "open-master" }
+      { Cli.option with name = "open-service" }
+      { Cli.option with name = "ctrl-address" }
+      { Cli.option with name = "logic-id" }
+      { Cli.option with name = "public-key" }
+      { Cli.option with name = "process-id"
+                        shortName = "pid" }
+      { Cli.option with name = "process-start-time"
+                        shortName = "pstartt" }
+    ])
+
+let private parseArgs (args : string []) = 
+    try 
+        let result = parser.Parse args
+        Ok result
+    with ex -> 
+        printf "%A" ex
+        Result.Error ex
+
 let encrypt publicKey (data : string) : byte array = 
     let cspParams = CspParameters()
     cspParams.ProviderType <- 1
@@ -69,7 +90,7 @@ let on_hamster_db_change (e : FileSystemEventArgs) : unit =
         ()
 
 let ctrlloop (config : Map<string, string>) = 
-    let ca = config.["controlAddress"]
+    let ca = config.["control-address"]
     let lid = config.["logicId"]
     sprintf "In control loop with: controlAddress \"%s\", logicId \"%s\"." ca lid |> log.Trace
     let s = Nn.Socket(Domain.SP, Protocol.RESPONDENT)
@@ -87,24 +108,24 @@ let ctrlloop (config : Map<string, string>) =
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
             
             let args = 
-                match nparts |> List.ofArray with
-                | [] -> []
+                match nparts  with
+                | [||] -> [||]
                 | l -> l.[1..]
             
             let cmd = 
-                match Cli.parseArgs args with
+                match parseArgs args with
                 | Error exn -> 
                     sprintf "[%s] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                     note
                 | Ok parsed -> 
-                    match parsed.TryGetValue "logicId" with
-                    | false, _ -> 
+                    match parsed |> Map.tryFind "logicId" with
+                    | None -> 
                         sprintf "[%s] No logicId in note \"%s\"." lid note |> log.Warn
                         note
-                    | true, logicId when logicId <> lid.ToString() -> 
+                    | Some logicId when logicId <> lid.ToString() -> 
                         sprintf "[%s] Invalid logicId ignoring note \"%s\". " lid note |> log.Warn
                         String.Empty
-                    | true, logicId -> 
+                    | Some logicId -> 
                         if nparts.Length > 0 then nparts.[0]
                         else String.Empty
             
@@ -137,9 +158,7 @@ let ctrlloop (config : Map<string, string>) =
     recvloop()
 
 let Start(config : Map<string, string>) = 
-    Cli.addArg { Cli.arg with Option = "--logic-id"
-                              Destination = "logicId" }
-    let ca = config.["controlAddress"]
+    let ca = config.["control-address"]
     let p, logicId = Int32.TryParse config.["logicId"]
     if not p then raise (ArgumentException("locigId"))
     let ckey = randomKey()

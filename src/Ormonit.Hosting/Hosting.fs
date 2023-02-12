@@ -9,7 +9,6 @@ open System.Collections.Generic
 open System.Threading
 open System.Threading.Tasks
 open System.Diagnostics
-open System
 
 module internal Host = 
     let log = LogManager.GetLogger "Ormonit.Hosting"
@@ -38,18 +37,27 @@ module internal Host =
     logConfig.LoggingRules.Add(rule2)
     LogManager.Configuration <- logConfig
 
-    Cli.addArg { Cli.arg with Option = "-pid"
-                              LongOption = "--process-id"
-                              Destination = "processId" }
-    Cli.addArg { Cli.arg with Option = "-pstartt"
-                              LongOption = "--process-start-time"
-                              Destination = "processStartTime" }
-    Cli.addArg { Cli.arg with Option = "--ctrl-address"
-                              Destination = "controlAddress" }
-    Cli.addArg { Cli.arg with Option = "--logic-id"
-                              Destination = "logicId" }
-    Cli.addArg { Cli.arg with Option = "--public-key"
-                              Destination = "publicKey" }
+    let parser = new Cli.Parser([
+        { Cli.option with name = "notify"
+                          shortName = "n" }
+        { Cli.option with name = "open-master" }
+        { Cli.option with name = "open-service" }
+        { Cli.option with name = "ctrl-address" }
+        { Cli.option with name = "logic-id" }
+        { Cli.option with name = "public-key" }
+        { Cli.option with name = "process-id"
+                          shortName = "pid" }
+        { Cli.option with name = "process-start-time"
+                          shortName = "pstartt" } ])
+
+    let parseArgs (args : string []) = 
+        try 
+            let result = parser.Parse args
+            Ok result
+        with ex -> 
+            printf "%A" ex
+            Error ex
+
 
 [<Struct>]
 type ReportStatusToken = 
@@ -160,32 +168,32 @@ type ServiceHost() =
 
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
 
-            let args = 
-                List.ofArray (if nparts.Length > 1 then nparts.[1..]
-                              else [||])
+            let args =
+                if nparts.Length = 0 then nparts
+                else nparts.[1..]
 
-            match Cli.parseArgs args with 
+            match Host.parseArgs args with 
             | Error ex -> 
                 sprintf "[%d] Host unable to parse arguments in note \"%s\"." lid note |> log.Warn
                 Error ex.Message
             | Ok parsedArgs -> 
                 let cmd = 
                     let isValidProcessId =
-                        match parsedArgs.TryGetValue "processId" with
-                        | false, _ -> 
+                        match parsedArgs |> Map.tryFind "process-id" with
+                        | None -> 
                             sprintf "[%d] No processId in note \"%s\"." lid note |> log.Warn
                             false
-                        | true, processId when processId <> lid.ToString() -> 
+                        | Some processId when processId <> lid.ToString() -> 
                             sprintf "[%d] Invalid processId ignoring note \"%s\"." lid note |> log.Warn
                             false
                         | _ -> true
                     let isValidLogicId = 
-                        match parsedArgs.TryGetValue "logicId" with
-                        | false, _ -> 
+                        match parsedArgs |> Map.tryFind "logic-id" with
+                        | None -> 
                             sprintf "[%d] No logicId in note \"%s\"." lid note |> log.Warn
                             false
-                        | _ -> 
-                            match Int32.TryParse (parsedArgs.["logicId"]) with
+                        | Some logicId -> 
+                            match Int32.TryParse (logicId) with
                             | false, _ -> false
                             | _ -> true
                     let isValid = isValidProcessId && isValidLogicId
@@ -218,13 +226,13 @@ type ServiceHost() =
         assert (Cilnn.Nn.SetSockOpt(sok, Cilnn.SocketOption.RCVTIMEO, Ctrl.superviseInterval * 5) = 0)
         //TODO:error handling for socket and connect
         assert (sok >= 0)
-        let eid = Cilnn.Nn.Connect(sok, config.["controlAddress"])
+        let eid = Cilnn.Nn.Connect(sok, config.["control-address"])
         assert (eid >= 0)
-        let lid = Int32.Parse config.["logicId"]
+        let lid = Int32.Parse config.["logic-id"]
         let publicKey = 
-            match config.TryGetValue "publicKey" with
-            | false, _ -> None
-            | true, puk -> Some puk
+            match config |> Map.tryFind "public-key" with
+            | None -> None
+            | Some puk -> Some puk
         use ctsrc = new CancellationTokenSource()
         ts
         |> Seq.iter (fun t -> 
@@ -256,24 +264,24 @@ type ServiceHost() =
                     matchTMsg (Ok head.msg) whenmsg (fun _ -> emptyResult)
 
             let nparts = note.Split([| ' ' |], StringSplitOptions.RemoveEmptyEntries)
-            let args = 
-                List.ofArray (if nparts.Length > 1 then nparts.[1..]
-                              else [||])
+            let args =
+                if nparts.Length > 1 then nparts.[1..]
+                else [||]
     
-            match Cli.parseArgs args with 
+            match Host.parseArgs args with 
             | Error _ -> 
                 sprintf "[%d] Unable to parse arguments in note \"%s\"." lid note |> log.Warn
                 recvloop nmsg
             | Ok parsedArgs -> 
                 let command = 
-                    match parsedArgs.TryGetValue "logicId" with
-                    | false, _ -> 
+                    match parsedArgs |> Map.tryFind "logic-id" with
+                    | None -> 
                         sprintf "[%d] No logicId in note \"%s\"." lid note |> log.Warn
                         Some note
-                    | true, logicId when logicId <> lid.ToString() -> 
+                    | Some logicId when logicId <> lid.ToString() -> 
                         sprintf "[%d] Invalid logicId ignoring note \"%s\"." lid note |> log.Warn
                         None
-                    | true, _ -> 
+                    | _ -> 
                         if nparts.Length > 0 then Some nparts.[0]
                         else None
                 match command with
